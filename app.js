@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   "use strict";
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
@@ -162,7 +162,7 @@
 
     try {
       var specs = parseIds(state.idsText);
-      var modelData = await fetchModelDataFromStreamBim(state.streamBim.api);
+      var modelData = await fetchModelDataFromStreamBim(state.streamBim.api, specs);
       var report = validateObjects(specs, modelData.objects);
       state.validation = report;
       renderSummary(report);
@@ -194,19 +194,22 @@
     }
   }
 
-  async function fetchModelDataFromStreamBim(api) {
+  async function fetchModelDataFromStreamBim(api, specs) {
     state.streamBim.methods = listCallableMethods(api);
     renderApiMethods();
-
-    if (typeof api.getObjectInfoForSearch === "function") {
-      return fetchViaObjectInfoSearch(api);
-    }
 
     if (
       typeof api.findObjects === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
-      return fetchViaFindObjects(api);
+      return fetchViaApplicabilitySearch(api, specs);
+    }
+
+    if (
+      typeof api.getObjectInfoForSearch === "function" &&
+      typeof api.getObjectInfo === "function"
+    ) {
+      return fetchViaObjectInfoSearch(api, specs);
     }
 
     var objectMethods = [
@@ -279,70 +282,162 @@
     return { objects: hydrated };
   }
 
-  async function fetchViaObjectInfoSearch(api) {
+  async function fetchViaApplicabilitySearch(api, specs) {
+    var searches = buildApplicabilitySearches(specs);
+    var seenGuids = {};
+    var guids = [];
+
+    for (var i = 0; i < searches.length; i += 1) {
+      var response = await runFindObjectsQueries(api, searches[i]);
+      var searchGuids = extractGuidsFromResponse(response);
+      for (var j = 0; j < searchGuids.length; j += 1) {
+        if (!seenGuids[searchGuids[j]]) {
+          seenGuids[searchGuids[j]] = true;
+          guids.push(searchGuids[j]);
+        }
+      }
+    }
+
+    if (!guids.length) {
+      return { objects: [] };
+    }
+
+    var objects = [];
+    for (var k = 0; k < guids.length; k += 1) {
+      objects.push(await api.getObjectInfo(guids[k]));
+    }
+
+    return { objects: normalizeObjects(await hydrateObjects(api, objects)).objects };
+  }
+
+  function buildApplicabilitySearches(specs) {
+    var seen = {};
+    var searches = [];
+
+    specs.forEach(function (spec) {
+      (spec.applicability || []).forEach(function (rule) {
+        var searchValue = buildSearchValue(rule.valueRule);
+        if (!rule.baseName || !searchValue) {
+          return;
+        }
+
+        var key = [rule.propertySet || "", rule.baseName, searchValue].join("::");
+        if (seen[key]) {
+          return;
+        }
+
+        seen[key] = true;
+        searches.push({
+          propertySet: rule.propertySet || "",
+          propertyName: rule.baseName,
+          value: searchValue,
+        });
+      });
+    });
+
+    return searches;
+  }
+
+  function buildSearchValue(valueRule) {
+    if (!valueRule || valueRule.type !== "equals") {
+      return "";
+    }
+    return stringifyValue(valueRule.value).trim();
+  }
+
+  async function runFindObjectsQueries(api, search) {
+    var candidateKeys = [
+      search.propertyName,
+      search.propertySet ? search.propertySet + "." + search.propertyName : "",
+      search.propertySet ? search.propertySet + ":" + search.propertyName : "",
+      search.propertySet ? search.propertySet + "/" + search.propertyName : "",
+    ].filter(Boolean);
+
+    for (var i = 0; i < candidateKeys.length; i += 1) {
+      try {
+        var response = await invokeMethodGuessing(api, "findObjects", [
+          { key: candidateKeys[i], value: search.value, limit: 1000 },
+          { key: candidateKeys[i], value: search.value },
+        ]);
+        if (extractGuidsFromResponse(response).length) {
+          return response;
+        }
+      } catch (error) {}
+    }
+
+    return [];
+  }
+
+  async function fetchViaObjectInfoSearch(api, specs) {
     var pageSize = 200;
-    var skip = 0;
-    var pageIndex = 0;
     var allObjects = [];
-    var lastSignature = "";
+    var searches = buildApplicabilitySearches(specs);
 
-    while (pageIndex < 100) {
-      var response = await invokeMethodGuessing(api, "getObjectInfoForSearch", [
-        {
-          page: { limit: pageSize, skip: skip },
-          sort: { field: "Name", descending: false },
-          fieldUnion: true,
-        },
-        {
-          filter: {},
-          page: { limit: pageSize, skip: skip },
-          sort: { field: "Name", descending: false },
-          fieldUnion: true,
-        },
-        {
-          filter: { key: "Name", value: "" },
-          page: { limit: pageSize, skip: skip },
-          sort: { field: "Name", descending: false },
-          fieldUnion: true,
-        },
-        {
-          filter: { key: "ID", value: "" },
-          page: { limit: pageSize, skip: skip },
-          sort: { field: "ID", descending: false },
-          fieldUnion: true,
-        },
-        {
-          page: { limit: pageSize, skip: skip },
-          fieldUnion: true,
-        },
-      ]);
-      var pageObjects = extractObjectsFromResponse(response);
-      if (!pageObjects.length) {
-        break;
+    if (!searches.length) {
+      return { objects: [] };
+    }
+
+    for (var searchIndex = 0; searchIndex < searches.length; searchIndex += 1) {
+      var skip = 0;
+      var pageIndex = 0;
+      var lastSignature = "";
+
+      while (pageIndex < 100) {
+        var response = await invokeMethodGuessing(api, "getObjectInfoForSearch", [
+          {
+            filter: {
+              key: searches[searchIndex].propertyName,
+              value: searches[searchIndex].value,
+            },
+            page: { limit: pageSize, skip: skip },
+          },
+          {
+            filter: {
+              key:
+                searches[searchIndex].propertySet +
+                "." +
+                searches[searchIndex].propertyName,
+              value: searches[searchIndex].value,
+            },
+            page: { limit: pageSize, skip: skip },
+          },
+          {
+            filter: {
+              key:
+                searches[searchIndex].propertySet +
+                ":" +
+                searches[searchIndex].propertyName,
+              value: searches[searchIndex].value,
+            },
+            page: { limit: pageSize, skip: skip },
+          },
+        ]);
+        var pageObjects = extractObjectsFromResponse(response);
+        if (!pageObjects.length) {
+          break;
+        }
+
+        var signature = buildPageSignature(pageObjects);
+        if (pageIndex > 0 && signature && signature === lastSignature) {
+          break;
+        }
+
+        allObjects = allObjects.concat(pageObjects);
+        lastSignature = signature;
+        if (pageObjects.length < pageSize) {
+          break;
+        }
+
+        skip += pageSize;
+        pageIndex += 1;
       }
-
-      var signature = buildPageSignature(pageObjects);
-      if (pageIndex > 0 && signature && signature === lastSignature) {
-        break;
-      }
-
-      allObjects = allObjects.concat(pageObjects);
-      lastSignature = signature;
-      if (pageObjects.length < pageSize) {
-        break;
-      }
-
-      skip += pageSize;
-      pageIndex += 1;
     }
 
     if (!allObjects.length) {
-      throw new Error(
-        "StreamBIM svarte, men returnerte ingen objektdata fra getObjectInfoForSearch.",
-      );
+      return { objects: [] };
     }
 
-    return { objects: normalizeObjects(allObjects).objects };
+    return { objects: normalizeObjects(await hydrateObjects(api, allObjects)).objects };
   }
 
   async function fetchViaFindObjects(api) {
@@ -1405,3 +1500,5 @@
       .replace(/'/g, "&#39;");
   }
 })();
+
+
