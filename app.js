@@ -387,11 +387,7 @@
   }
 
   async function runFindObjectsQueries(api, search) {
-    var candidateKeys = await prioritizeSearchKeys(
-      api,
-      buildSearchKeys(search.propertySet, search.propertyName),
-      search.value,
-    );
+    var candidateKeys = buildSearchKeys(search.propertySet, search.propertyName);
 
     for (var i = 0; i < candidateKeys.length; i += 1) {
       try {
@@ -427,56 +423,13 @@
 
 
   function buildSearchKeys(propertySet, propertyName) {
-    return [
+    return uniqueStrings([
       propertySet ? propertySet + "~" + propertyName : "",
-      propertyName,
       propertySet ? propertySet + "." + propertyName : "",
-      propertySet ? propertySet + ":" + propertyName : "",
-      propertySet ? propertySet + "/" + propertyName : "",
-      propertySet ? propertySet + ">" + propertyName : "",
-      propertySet ? propertySet + " - " + propertyName : "",
-    ].filter(Boolean);
+      propertyName,
+    ]).filter(Boolean);
   }
 
-  async function prioritizeSearchKeys(api, candidateKeys, expectedValue) {
-    var uniqueKeys = uniqueStrings(candidateKeys);
-    if (!api || typeof api.valuesForObjectProperty !== "function") {
-      return uniqueKeys;
-    }
-
-    var exactMatches = [];
-    var populated = [];
-    var unknown = [];
-    var expected = normalizeComparisonText(expectedValue);
-
-    for (var i = 0; i < uniqueKeys.length; i += 1) {
-      try {
-        var values = coerceArray(await api.valuesForObjectProperty(uniqueKeys[i]))
-          .map(stringifyValue)
-          .filter(Boolean);
-
-        if (!values.length) {
-          unknown.push(uniqueKeys[i]);
-          continue;
-        }
-
-        if (
-          values.some(function (value) {
-            return normalizeComparisonText(value) === expected;
-          })
-        ) {
-          exactMatches.push(uniqueKeys[i]);
-          continue;
-        }
-
-        populated.push(uniqueKeys[i]);
-      } catch (error) {
-        unknown.push(uniqueKeys[i]);
-      }
-    }
-
-    return uniqueStrings(exactMatches.concat(populated, unknown));
-  }
 
   async function hydrateObjects(api, objects) {
     if (!api || typeof api.getObjectInfo !== "function") {
