@@ -3,6 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
+  var BUILD_ID = "2026-03-17-bef9c6c-2";
 
   var state = {
     streamBim: {
@@ -22,6 +23,7 @@
   function init() {
     bindElements();
     bindEvents();
+    renderBuildInfo();
     connectToStreamBim();
   }
 
@@ -43,6 +45,13 @@
     els.groupsRoot = byId("groups-root");
   }
 
+  function renderBuildInfo() {
+    els.connectionDetail.textContent = "Build " + BUILD_ID + " - venter pa parent frame";
+    if (typeof console !== "undefined" && console.info) {
+      console.info("[IDS SVV] Build", BUILD_ID);
+    }
+  }
+
   function bindEvents() {
     els.idsFile.addEventListener("change", onIdsFileSelected);
     els.loadSampleBtn.addEventListener("click", loadSampleIds);
@@ -51,7 +60,7 @@
   }
 
   function connectToStreamBim() {
-    setConnectionState("Kobler til", "Venter pa parent frame", "");
+    setConnectionState("Kobler til", "Build " + BUILD_ID + " - venter pa parent frame", "");
     window.StreamBIM.connect({})
       .then(function () {
         state.streamBim.connected = true;
@@ -235,7 +244,7 @@
       objects: [],
       diagnostic:
         targeted.diagnostic ||
-        "Widgeten fant ingen IDS-treff via StreamBIM-sok, og denne prosjektkonfigurasjonen tilbyr ingen fullmodell-metode for widgeter.",
+        "Build " + BUILD_ID + ": Widgeten fant ingen IDS-treff via StreamBIM-sok, og denne prosjektkonfigurasjonen tilbyr ingen fullmodell-metode for widgeter.",
     };
   }
 
@@ -304,7 +313,9 @@
 
     if (!objectsResponse) {
       throw new Error(
-        "Fant ingen StreamBIM-metode for a lese modellobjekter. Tilgjengelige metoder: " +
+        "Build " +
+          BUILD_ID +
+          ": Fant ingen StreamBIM-metode for a lese modellobjekter. Tilgjengelige metoder: " +
           state.streamBim.methods.join(", "),
       );
     }
