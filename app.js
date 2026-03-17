@@ -202,16 +202,6 @@
     renderApiMethods();
 
     if (
-      typeof api.getObjectInfoForSearch === "function" &&
-      typeof api.getObjectInfo === "function"
-    ) {
-      var targetedSearch = await fetchViaObjectInfoSearch(api, specs);
-      if (targetedSearch.objects.length) {
-        return targetedSearch;
-      }
-    }
-
-    if (
       typeof api.findObjects === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
@@ -247,51 +237,6 @@
     return { objects: normalizeObjects(objects).objects };
   }
 
-  async function fetchViaObjectInfoSearch(api, specs) {
-    var searches = buildApplicabilitySearches(specs);
-    var identities = {};
-    var objects = [];
-
-    for (var i = 0; i < searches.length; i += 1) {
-      var pageSize = 200;
-      var skip = 0;
-      var pageIndex = 0;
-      var lastSignature = "";
-
-      while (pageIndex < 100) {
-        var response = await runObjectInfoSearchQueries(api, searches[i], pageSize, skip);
-        var pageObjects = extractObjectsFromResponse(response);
-        if (!pageObjects.length) {
-          break;
-        }
-
-        var signature = buildPageSignature(pageObjects);
-        if (pageIndex > 0 && signature && signature === lastSignature) {
-          break;
-        }
-
-        for (var j = 0; j < pageObjects.length; j += 1) {
-          var hydrated = await bestEffortGetObjectInfo(api, pageObjects[j]);
-          var identity = buildObjectIdentity(hydrated);
-          if (!identity || identities[identity]) {
-            continue;
-          }
-          identities[identity] = true;
-          objects.push(mergeObjectPayloads(pageObjects[j], hydrated));
-        }
-
-        lastSignature = signature;
-        if (pageObjects.length < pageSize) {
-          break;
-        }
-
-        skip += pageSize;
-        pageIndex += 1;
-      }
-    }
-
-    return { objects: normalizeObjects(objects).objects };
-  }
 
   async function fetchViaGenericObjectMethods(api) {
     var objectMethods = [
@@ -416,48 +361,6 @@
     return [];
   }
 
-  async function runObjectInfoSearchQueries(api, search, pageSize, skip) {
-    var rulesQuery = {
-      filter: {
-        rules: [
-          [
-            {
-              psetName: search.propertySet || undefined,
-              propKey: search.propertyName,
-              propValue: search.value,
-              operator: "=",
-            },
-          ],
-        ],
-      },
-      page: { limit: pageSize, skip: skip },
-      sort: { field: "Name", descending: false },
-    };
-
-    try {
-      var directResponse = await api.getObjectInfoForSearch(rulesQuery);
-      if (extractObjectsFromResponse(directResponse).length) {
-        return directResponse;
-      }
-    } catch (error) {}
-
-    var candidateKeys = buildSearchKeys(search.propertySet, search.propertyName);
-
-    for (var i = 0; i < candidateKeys.length; i += 1) {
-      try {
-        var response = await api.getObjectInfoForSearch({
-          filter: { key: candidateKeys[i], value: search.value },
-          page: { limit: pageSize, skip: skip },
-          sort: { field: "Name", descending: false },
-        });
-        if (extractObjectsFromResponse(response).length) {
-          return response;
-        }
-      } catch (error) {}
-    }
-
-    return [];
-  }
 
   function buildSearchKeys(propertySet, propertyName) {
     return [
