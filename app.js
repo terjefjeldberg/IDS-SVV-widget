@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-17-ifcapi-1";
+  var BUILD_ID = "2026-03-17-searchapi-1";
 
   var state = {
     streamBim: {
@@ -218,11 +218,10 @@
     var targeted = { objects: [], diagnostic: "" };
 
     if (
-      typeof api.makeApiRequest === "function" &&
-      typeof api.getProjectId === "function" &&
+      typeof api.getObjectInfoForSearch === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
-      targeted = await fetchViaIfcSearchApi(api, specs);
+      targeted = await fetchViaObjectInfoSearch(api, specs);
       if (targeted.objects.length) {
         return targeted;
       }
@@ -298,36 +297,29 @@
     };
   }
 
-  async function fetchViaIfcSearchApi(api, specs) {
+  async function fetchViaObjectInfoSearch(api, specs) {
     var searches = buildApplicabilitySearches(specs);
     var identities = {};
     var objects = [];
     var diagnostics = [];
-    var context = await createIfcApiContext(api);
-
-    if (!context.apiBases.length) {
-      return {
-        objects: [],
-        diagnostic: "Build " + BUILD_ID + ": Klarte ikke etablere IFC API-kontekst for StreamBIM-sok.",
-      };
-    }
+    var buildingId = await bestEffortGetBuildingId(api);
 
     for (var i = 0; i < searches.length; i += 1) {
-      var queryResult = await runIfcApiSearch(api, context, searches[i]);
-      var guids = extractGuidsFromExportResponse(queryResult.response);
+      var queryResult = await runObjectInfoSearch(api, searches[i], buildingId);
+      var candidates = extractObjectsFromResponse(queryResult.response);
 
-      if (!guids.length && queryResult.diagnostic) {
+      if (!candidates.length && queryResult.diagnostic) {
         diagnostics.push(queryResult.diagnostic);
       }
 
-      for (var j = 0; j < guids.length; j += 1) {
-        var hydrated = await bestEffortGetObjectInfo(api, guids[j]);
-        var identity = buildObjectIdentity(hydrated) || stringifyValue(guids[j]);
+      for (var j = 0; j < candidates.length; j += 1) {
+        var hydrated = await bestEffortGetObjectInfo(api, candidates[j]);
+        var identity = buildObjectIdentity(hydrated);
         if (!identity || identities[identity]) {
           continue;
         }
         identities[identity] = true;
-        objects.push(mergeObjectPayloads({ guid: stringifyValue(guids[j]) }, hydrated));
+        objects.push(mergeObjectPayloads(candidates[j], hydrated));
       }
     }
 
@@ -337,75 +329,28 @@
     };
   }
 
-  async function createIfcApiContext(api) {
-    var projectId = "";
-    var buildingId = "1000";
-
-    try {
-      projectId = stringifyValue(await api.getProjectId()).trim();
-    } catch (error) {}
-
-    try {
-      var resolvedBuildingId = stringifyValue(await api.getBuildingId()).trim();
-      if (resolvedBuildingId) {
-        buildingId = resolvedBuildingId;
-      }
-    } catch (error) {}
-
-    return {
-      projectId: projectId,
-      buildingId: buildingId,
-      apiBases: buildIfcApiBaseCandidates(projectId),
-    };
-  }
-
-  async function runIfcApiSearch(api, context, search) {
+  async function runObjectInfoSearch(api, search, buildingId) {
+    var queries = buildObjectInfoQueries(search, buildingId);
     var errors = [];
-    var ruleVariants = buildIfcApiRuleVariants(context.buildingId, search);
 
-    for (var i = 0; i < context.apiBases.length; i += 1) {
-      for (var j = 0; j < ruleVariants.length; j += 1) {
-        try {
-          var createResponse = await makeApiJsonRequest(api, {
-            url: context.apiBases[i] + "/ifc-searches",
-            method: "POST",
-            accept: "application/json",
-            contentType: "application/json",
-            body: { rules: [[ruleVariants[j]]] },
-          });
-          var searchId = extractSearchId(createResponse);
-          if (!searchId) {
-            continue;
-          }
-
-          var exportResponse = await makeApiJsonRequest(api, {
-            url:
-              context.apiBases[i] +
-              "/ifc-searches/export/json?searchId=" +
-              encodeURIComponent(searchId) +
-              "&fieldUnion=true&fieldNames=" +
-              encodeURIComponent(base64Encode("GUID|Name|GlobalId|Type")) +
-              "&page[limit]=1000&page[skip]=0",
-            method: "GET",
-            accept: "application/json",
-          });
-
-          if (extractGuidsFromExportResponse(exportResponse).length) {
-            return {
-              response: exportResponse,
-              diagnostic: "",
-            };
-          }
-        } catch (error) {
-          errors.push(getErrorMessage(error));
+    for (var i = 0; i < queries.length; i += 1) {
+      try {
+        var response = await api.getObjectInfoForSearch(queries[i]);
+        if (extractObjectsFromResponse(response).length) {
+          return {
+            response: response,
+            diagnostic: "",
+          };
         }
+      } catch (error) {
+        errors.push(getErrorMessage(error));
       }
     }
 
     return {
       response: [],
       diagnostic:
-        "IFC API fant ingen treff for " +
+        "Search API fant ingen treff for " +
         search.propertySet +
         "." +
         search.propertyName +
@@ -415,113 +360,49 @@
     };
   }
 
-  function buildIfcApiBaseCandidates(projectId) {
-    var cleanedProjectId = String(projectId || "")
-      .trim()
-      .replace(/^\/+|\/+$/g, "");
+  function buildObjectInfoQueries(search, buildingId) {
+    var queries = [];
 
-    if (!cleanedProjectId) {
-      return ["/api/v1"];
-    }
-
-    var projectSegment = cleanedProjectId;
-    if (/^\d+$/.test(projectSegment)) {
-      projectSegment = "project-" + projectSegment;
-    }
-
-    return uniqueStrings([
-      "/" + projectSegment + "/api/v1",
-      "/pgw/" + projectSegment + "/api/v1",
-      "/api/v1",
-    ]);
-  }
-
-  function buildIfcApiRuleVariants(buildingId, search) {
-    return [
-      {
-        buildingId: buildingId,
-        psetName: search.propertySet || undefined,
-        propKey: search.propertyName,
-        propValue: search.value,
-        operator: "=",
+    queries.push({
+      filter: {
+        rules: [[{
+          buildingId: buildingId,
+          psetName: search.propertySet || undefined,
+          propKey: search.propertyName,
+          propValue: search.value,
+          operator: "=",
+        }]],
       },
-      {
-        buildingId: buildingId,
-        propKey: search.propertySet
-          ? search.propertySet + "." + search.propertyName
-          : search.propertyName,
-        propValue: search.value,
-        operator: "=",
-      },
-      {
-        buildingId: buildingId,
-        propKey: search.propertySet
-          ? search.propertySet + "~" + search.propertyName
-          : search.propertyName,
-        propValue: search.value,
-        operator: "=",
-      },
-      {
-        buildingId: buildingId,
-        propKey: search.propertyName,
-        propValue: search.value,
-        operator: "=",
-      },
-    ];
-  }
+      page: { limit: 1000, skip: 0 },
+      sort: { field: "Name", descending: false },
+    });
 
-  async function makeApiJsonRequest(api, request) {
-    var rawResponse = await api.makeApiRequest(request);
-    if (!rawResponse) {
-      return {};
+    var fallbackKeys = buildSearchKeys(search.propertySet, search.propertyName);
+    for (var i = 0; i < fallbackKeys.length; i += 1) {
+      queries.push({
+        filter: { key: fallbackKeys[i], value: search.value },
+        page: { limit: 1000, skip: 0 },
+        sort: { field: "Name", descending: false },
+      });
     }
-    if (typeof rawResponse === "string") {
-      try {
-        return JSON.parse(rawResponse);
-      } catch (error) {
-        return { raw: rawResponse };
-      }
+
+    return queries;
+  }
+
+  async function bestEffortGetBuildingId(api) {
+    if (!api || typeof api.getBuildingId !== "function") {
+      return "1000";
     }
-    return rawResponse;
-  }
 
-  function extractSearchId(response) {
-    return firstNonEmpty([
-      response && response.searchId,
-      response && response.id,
-      response && response.data && response.data.searchId,
-      response && response.data && response.data.id,
-    ]);
-  }
-
-  function extractGuidsFromExportResponse(response) {
-    return uniqueStrings(
-      extractObjectsFromResponse(response)
-        .map(function (item) {
-          if (typeof item === "string") {
-            return item;
-          }
-          return firstNonEmpty([
-            item.GUID,
-            item.guid,
-            item.GlobalId,
-            item.globalId,
-            item.ifcGuid,
-            buildObjectIdentity(item),
-          ]);
-        })
-        .filter(Boolean),
-    );
-  }
-
-  function base64Encode(value) {
-    if (typeof btoa === "function") {
-      return btoa(value);
+    try {
+      return stringifyValue(await api.getBuildingId()).trim() || "1000";
+    } catch (error) {
+      return "1000";
     }
-    return value;
   }
 
   async function fetchViaGenericObjectMethods(api) {
+
     var objectMethods = [
       "getObjectsWithProperties",
       "getModelObjectsWithProperties",
