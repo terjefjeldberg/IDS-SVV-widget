@@ -54,8 +54,8 @@
     window.StreamBIM.connect({})
       .then(function (api) {
         state.streamBim.connected = true;
-        state.streamBim.api = api || window.StreamBIM;
-        state.streamBim.methods = Object.keys(api || {}).sort();
+        state.streamBim.api = window.StreamBIM;
+        state.streamBim.methods = listCallableMethods(state.streamBim.api);
         renderApiMethods();
         setConnectionState(
           "Tilkoblet",
@@ -186,6 +186,20 @@
   }
 
   async function fetchModelDataFromStreamBim(api) {
+    state.streamBim.methods = listCallableMethods(api);
+    renderApiMethods();
+
+    if (typeof api.getObjectInfoForSearch === "function") {
+      return fetchViaObjectInfoSearch(api);
+    }
+
+    if (
+      typeof api.findObjects === "function" &&
+      typeof api.getObjectInfo === "function"
+    ) {
+      return fetchViaFindObjects(api);
+    }
+
     var objectMethods = [
       "getObjectsWithProperties",
       "getModelObjectsWithProperties",
@@ -254,6 +268,199 @@
     }
 
     return { objects: hydrated };
+  }
+
+  async function fetchViaObjectInfoSearch(api) {
+    var pageSize = 200;
+    var skip = 0;
+    var pageIndex = 0;
+    var allObjects = [];
+    var lastSignature = "";
+
+    while (pageIndex < 100) {
+      var response = await invokeMethodGuessing(api, "getObjectInfoForSearch", [
+        {
+          page: { limit: pageSize, skip: skip },
+          sort: { field: "Name", descending: false },
+          fieldUnion: true,
+        },
+        {
+          filter: {},
+          page: { limit: pageSize, skip: skip },
+          sort: { field: "Name", descending: false },
+          fieldUnion: true,
+        },
+        {
+          filter: { key: "Name", value: "" },
+          page: { limit: pageSize, skip: skip },
+          sort: { field: "Name", descending: false },
+          fieldUnion: true,
+        },
+        {
+          filter: { key: "ID", value: "" },
+          page: { limit: pageSize, skip: skip },
+          sort: { field: "ID", descending: false },
+          fieldUnion: true,
+        },
+        {
+          page: { limit: pageSize, skip: skip },
+          fieldUnion: true,
+        },
+      ]);
+      var pageObjects = extractObjectsFromResponse(response);
+      if (!pageObjects.length) {
+        break;
+      }
+
+      var signature = buildPageSignature(pageObjects);
+      if (pageIndex > 0 && signature && signature === lastSignature) {
+        break;
+      }
+
+      allObjects = allObjects.concat(pageObjects);
+      lastSignature = signature;
+      if (pageObjects.length < pageSize) {
+        break;
+      }
+
+      skip += pageSize;
+      pageIndex += 1;
+    }
+
+    if (!allObjects.length) {
+      throw new Error(
+        "StreamBIM svarte, men returnerte ingen objektdata fra getObjectInfoForSearch.",
+      );
+    }
+
+    return { objects: normalizeObjects(allObjects).objects };
+  }
+
+  async function fetchViaFindObjects(api) {
+    var pageSize = 200;
+    var skip = 0;
+    var pageIndex = 0;
+    var allGuids = [];
+    var lastSignature = "";
+
+    while (pageIndex < 100) {
+      var response = await invokeMethodGuessing(api, "findObjects", [
+        {
+          key: "Name",
+          value: "",
+          limit: pageSize,
+          skip: skip,
+        },
+        {
+          key: "ID",
+          value: "",
+          limit: pageSize,
+          skip: skip,
+        },
+        {
+          filter: { key: "Name", value: "" },
+          page: { limit: pageSize, skip: skip },
+          sort: { field: "Name", descending: false },
+        },
+        {
+          filter: { key: "ID", value: "" },
+          page: { limit: pageSize, skip: skip },
+          sort: { field: "ID", descending: false },
+        },
+      ]);
+      var pageGuids = extractGuidsFromResponse(response);
+      if (!pageGuids.length) {
+        break;
+      }
+
+      var signature = pageGuids.slice(0, 10).join("|");
+      if (pageIndex > 0 && signature && signature === lastSignature) {
+        break;
+      }
+
+      allGuids = allGuids.concat(pageGuids);
+      lastSignature = signature;
+      if (pageGuids.length < pageSize) {
+        break;
+      }
+
+      skip += pageSize;
+      pageIndex += 1;
+    }
+
+    if (!allGuids.length) {
+      throw new Error(
+        "StreamBIM svarte, men returnerte ingen GUID-er fra findObjects.",
+      );
+    }
+
+    var objects = [];
+    for (var i = 0; i < allGuids.length; i += 1) {
+      var guid = allGuids[i];
+      objects.push(await api.getObjectInfo(guid));
+    }
+
+    return { objects: normalizeObjects(objects).objects };
+  }
+
+  function extractObjectsFromResponse(response) {
+    if (!response) {
+      return [];
+    }
+
+    if (Array.isArray(response)) {
+      return response;
+    }
+
+    var candidates = [
+      response.items,
+      response.objects,
+      response.results,
+      response.rows,
+      response.data,
+    ];
+
+    for (var i = 0; i < candidates.length; i += 1) {
+      if (Array.isArray(candidates[i])) {
+        return candidates[i];
+      }
+    }
+
+    return [];
+  }
+
+  function extractGuidsFromResponse(response) {
+    if (!response) {
+      return [];
+    }
+
+    if (Array.isArray(response)) {
+      return response
+        .map(function (item) {
+          if (typeof item === "string") {
+            return item;
+          }
+          return pickFirst(item, ["guid", "globalId", "ifcGuid", "GlobalId"]);
+        })
+        .filter(Boolean);
+    }
+
+    return extractGuidsFromResponse(
+      response.items || response.objects || response.results || response.rows,
+    );
+  }
+
+  function buildPageSignature(items) {
+    return items
+      .slice(0, 10)
+      .map(function (item) {
+        return (
+          pickFirst(item, ["guid", "globalId", "ifcGuid", "GlobalId"]) ||
+          pickFirst(item, ["id", "objectId", "dbId", "expressId"]) ||
+          JSON.stringify(item).slice(0, 80)
+        );
+      })
+      .join("|");
   }
 
   function firstAvailableMethod(api, candidates) {
@@ -329,24 +536,40 @@
     }
 
     var containers = [
-      source.propertySets,
-      source.psets,
-      source.properties,
-      source.propertySetData,
-      source.data,
+      { value: source.propertySets, fallbackSetName: "", allowFlatMap: false },
+      { value: source.psets, fallbackSetName: "", allowFlatMap: false },
+      {
+        value: source.properties,
+        fallbackSetName: "__flat__",
+        allowFlatMap: true,
+      },
+      {
+        value: source.propertySetData,
+        fallbackSetName: "__flat__",
+        allowFlatMap: true,
+      },
+      { value: source.data, fallbackSetName: "__flat__", allowFlatMap: true },
     ];
 
     for (var i = 0; i < containers.length; i += 1) {
-      var extracted = normalizePropertyContainer(containers[i]);
+      var extracted = normalizePropertyContainer(
+        containers[i].value,
+        containers[i].fallbackSetName,
+        containers[i].allowFlatMap,
+      );
       if (Object.keys(extracted).length) {
         return extracted;
       }
     }
 
-    return normalizePropertyContainer(source);
+    return normalizePropertyContainer(source, "", false);
   }
 
-  function normalizePropertyContainer(container) {
+  function normalizePropertyContainer(
+    container,
+    fallbackSetName,
+    allowFlatMap,
+  ) {
     if (!container) {
       return {};
     }
@@ -360,6 +583,7 @@
     }
 
     var propertySets = {};
+    var flatValues = {};
     Object.keys(container).forEach(function (key) {
       var value = container[key];
       if (Array.isArray(value)) {
@@ -382,8 +606,21 @@
           return;
         }
         propertySets[key] = flattenPropertyMap(value);
+        return;
+      }
+      if (allowFlatMap) {
+        flatValues[key] = stringifyValue(value);
       }
     });
+
+    if (allowFlatMap && Object.keys(flatValues).length) {
+      propertySets[fallbackSetName || "__flat__"] = Object.assign(
+        {},
+        propertySets[fallbackSetName || "__flat__"] || {},
+        flatValues,
+      );
+    }
+
     return propertySets;
   }
 
@@ -704,10 +941,12 @@
   }
 
   function getPropertyValue(object, propertySet, propertyName) {
-    if (!object || !object.propertySets || !object.propertySets[propertySet]) {
+    if (!object || !object.propertySets) {
       return null;
     }
+
     if (
+      object.propertySets[propertySet] &&
       Object.prototype.hasOwnProperty.call(
         object.propertySets[propertySet],
         propertyName,
@@ -715,6 +954,39 @@
     ) {
       return object.propertySets[propertySet][propertyName];
     }
+
+    var flatKeys = [
+      propertyName,
+      propertySet + "." + propertyName,
+      propertySet + ":" + propertyName,
+      propertySet + "/" + propertyName,
+      propertySet + ">" + propertyName,
+    ];
+
+    for (var i = 0; i < flatKeys.length; i += 1) {
+      if (
+        object.propertySets.__flat__ &&
+        Object.prototype.hasOwnProperty.call(
+          object.propertySets.__flat__,
+          flatKeys[i],
+        )
+      ) {
+        return object.propertySets.__flat__[flatKeys[i]];
+      }
+    }
+
+    var setNames = Object.keys(object.propertySets);
+    for (var j = 0; j < setNames.length; j += 1) {
+      if (
+        Object.prototype.hasOwnProperty.call(
+          object.propertySets[setNames[j]],
+          propertyName,
+        )
+      ) {
+        return object.propertySets[setNames[j]][propertyName];
+      }
+    }
+
     return null;
   }
 
@@ -971,6 +1243,23 @@
 
   function byId(id) {
     return document.getElementById(id);
+  }
+
+  function listCallableMethods(api) {
+    if (!api) {
+      return [];
+    }
+
+    return Object.getOwnPropertyNames(api)
+      .filter(function (name) {
+        return (
+          typeof api[name] === "function" &&
+          name.charAt(0) !== "_" &&
+          name !== "connect" &&
+          name !== "connectToChild"
+        );
+      })
+      .sort();
   }
 
   function coerceArray(value) {
