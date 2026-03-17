@@ -171,10 +171,14 @@
       renderGroups(report);
 
       if (!report.summary.applicableObjectCount) {
-        setRunStatus(
-          "Validering ferdig, men ingen objekter matchet IDS applicability. Dette tyder pa at property-navnene fra StreamBIM fortsatt ikke treffer IDS-en.",
-          "state-warn",
-        );
+        var noMatchMessage = "Validering ferdig, men ingen objekter matchet IDS applicability.";
+        if (modelData.diagnostic) {
+          noMatchMessage += " " + modelData.diagnostic;
+        } else {
+          noMatchMessage +=
+            " Dette tyder pa at property-navnene fra StreamBIM fortsatt ikke treffer IDS-en.";
+        }
+        setRunStatus(noMatchMessage, "state-warn");
       } else {
         setRunStatus(
           "Validering ferdig. " +
@@ -201,27 +205,53 @@
     state.streamBim.methods = listCallableMethods(api);
     renderApiMethods();
 
+    var targeted = { objects: [], diagnostic: "" };
     if (
       typeof api.findObjects === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
-      var targeted = await fetchViaApplicabilitySearch(api, specs);
+      targeted = await fetchViaApplicabilitySearch(api, specs);
       if (targeted.objects.length) {
         return targeted;
       }
     }
 
-    return fetchViaGenericObjectMethods(api);
+    var genericObjectMethods = [
+      "getObjectsWithProperties",
+      "getModelObjectsWithProperties",
+      "getAllObjectsWithProperties",
+      "getObjects",
+      "getModelObjects",
+      "getElements",
+      "getAllObjects",
+      "getItems",
+    ];
+
+    if (firstAvailableMethod(api, genericObjectMethods)) {
+      return fetchViaGenericObjectMethods(api);
+    }
+
+    return {
+      objects: [],
+      diagnostic:
+        targeted.diagnostic ||
+        "Widgeten fant ingen IDS-treff via StreamBIM-sok, og denne prosjektkonfigurasjonen tilbyr ingen fullmodell-metode for widgeter.",
+    };
   }
 
   async function fetchViaApplicabilitySearch(api, specs) {
     var searches = buildApplicabilitySearches(specs);
     var identities = {};
     var objects = [];
+    var diagnostics = [];
 
     for (var i = 0; i < searches.length; i += 1) {
-      var response = await runFindObjectsQueries(api, searches[i]);
-      var candidates = extractObjectsFromResponse(response);
+      var queryResult = await runFindObjectsQueries(api, searches[i]);
+      var candidates = extractObjectsFromResponse(queryResult.response);
+
+      if (!candidates.length && queryResult.diagnostic) {
+        diagnostics.push(queryResult.diagnostic);
+      }
 
       for (var j = 0; j < candidates.length; j += 1) {
         var hydrated = await bestEffortGetObjectInfo(api, candidates[j]);
@@ -234,7 +264,10 @@
       }
     }
 
-    return { objects: normalizeObjects(objects).objects };
+    return {
+      objects: normalizeObjects(objects).objects,
+      diagnostic: diagnostics.slice(0, 3).join(" | "),
+    };
   }
 
 
@@ -343,7 +376,11 @@
   }
 
   async function runFindObjectsQueries(api, search) {
-    var candidateKeys = buildSearchKeys(search.propertySet, search.propertyName);
+    var candidateKeys = await prioritizeSearchKeys(
+      api,
+      buildSearchKeys(search.propertySet, search.propertyName),
+      search.value,
+    );
 
     for (var i = 0; i < candidateKeys.length; i += 1) {
       try {
@@ -353,12 +390,28 @@
           { filter: { key: candidateKeys[i], value: search.value }, limit: 1000 },
         ]);
         if (extractObjectsFromResponse(response).length) {
-          return response;
+          return {
+            response: response,
+            diagnostic: "",
+            matchedKey: candidateKeys[i],
+          };
         }
       } catch (error) {}
     }
 
-    return [];
+    return {
+      response: [],
+      diagnostic:
+        "Ingen treff for " +
+        search.propertySet +
+        "." +
+        search.propertyName +
+        "=" +
+        search.value +
+        ". Provde nokler: " +
+        candidateKeys.join(", "),
+      matchedKey: "",
+    };
   }
 
 
@@ -372,6 +425,46 @@
       propertySet ? propertySet + ">" + propertyName : "",
       propertySet ? propertySet + " - " + propertyName : "",
     ].filter(Boolean);
+  }
+
+  async function prioritizeSearchKeys(api, candidateKeys, expectedValue) {
+    var uniqueKeys = uniqueStrings(candidateKeys);
+    if (!api || typeof api.valuesForObjectProperty !== "function") {
+      return uniqueKeys;
+    }
+
+    var exactMatches = [];
+    var populated = [];
+    var unknown = [];
+    var expected = normalizeComparisonText(expectedValue);
+
+    for (var i = 0; i < uniqueKeys.length; i += 1) {
+      try {
+        var values = coerceArray(await api.valuesForObjectProperty(uniqueKeys[i]))
+          .map(stringifyValue)
+          .filter(Boolean);
+
+        if (!values.length) {
+          unknown.push(uniqueKeys[i]);
+          continue;
+        }
+
+        if (
+          values.some(function (value) {
+            return normalizeComparisonText(value) === expected;
+          })
+        ) {
+          exactMatches.push(uniqueKeys[i]);
+          continue;
+        }
+
+        populated.push(uniqueKeys[i]);
+      } catch (error) {
+        unknown.push(uniqueKeys[i]);
+      }
+    }
+
+    return uniqueStrings(exactMatches.concat(populated, unknown));
   }
 
   async function hydrateObjects(api, objects) {
@@ -461,6 +554,8 @@
       response.results,
       response.rows,
       response.data,
+      response.guids,
+      response.result,
     ];
 
     for (var i = 0; i < candidates.length; i += 1) {
@@ -1476,6 +1571,18 @@
       return [];
     }
     return Array.isArray(value) ? value : [value];
+  }
+
+  function uniqueStrings(values) {
+    var seen = {};
+    return coerceArray(values).filter(function (value) {
+      var key = String(value || "");
+      if (!key || seen[key]) {
+        return false;
+      }
+      seen[key] = true;
+      return true;
+    });
   }
 
   function pickFirst(source, keys) {
