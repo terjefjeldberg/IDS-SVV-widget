@@ -1,0 +1,137 @@
+﻿<!doctype html>
+<html lang="no">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>IDS SVV Widget</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="./styles.css" />
+    </head>
+    <body>
+        <div class="shell">
+            <header class="hero">
+                <div class="hero-copy">
+                    <p class="eyebrow">Statens vegvesen</p>
+                    <h1>IDS-kontroll i StreamBIM</h1>
+                    <p class="intro">
+                        Last opp en IDS-fil, hent objektdata fra StreamBIM, og grupper
+                        avvikene slik at de kan gjores om til BCF-saker direkte fra widgeten.
+                    </p>
+                </div>
+                <div class="hero-meta">
+                    <div class="status-card">
+                        <span class="status-label">StreamBIM</span>
+                        <strong id="connection-status">Kobler til</strong>
+                        <span id="connection-detail">Venter pa parent frame</span>
+                    </div>
+                    <div class="status-card">
+                        <span class="status-label">API</span>
+                        <strong id="api-method-count">0 metoder</strong>
+                        <span id="api-hint">Viser oppdagede metoder under</span>
+                    </div>
+                </div>
+            </header>
+
+            <main class="layout">
+                <section class="panel controls-panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">1. Input</p>
+                            <h2>IDS og validering</h2>
+                        </div>
+                    </div>
+
+                    <label class="upload-zone" for="ids-file">
+                        <input id="ids-file" type="file" accept=".ids,.xml" />
+                        <span class="upload-label">Slipp IDS-fil her eller velg fra disk</span>
+                        <span id="ids-file-name" class="upload-meta">
+                            Ingen IDS-fil valgt
+                        </span>
+                    </label>
+
+                    <div class="actions">
+                        <button id="load-sample-btn" class="btn btn-secondary" type="button">
+                            Last eksempel-IDS
+                        </button>
+                        <button id="validate-btn" class="btn btn-primary" type="button">
+                            Kjor IDS-kontroll
+                        </button>
+                    </div>
+
+                    <div class="inline-note">
+                        IFC-data hentes fra StreamBIM. Hvis widgeten ikke finner riktige
+                        API-metoder automatisk, kan du se hvilke metoder som er tilgjengelige
+                        under og justere adapteren videre.
+                    </div>
+                </section>
+
+                <section class="panel summary-panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">2. Resultat</p>
+                            <h2>Oversikt</h2>
+                        </div>
+                        <button id="create-all-bcf-btn" class="btn btn-ghost" type="button">
+                            Opprett BCF for alle grupper
+                        </button>
+                    </div>
+
+                    <div class="metrics" id="summary-metrics">
+                        <article class="metric">
+                            <span>Objekter lest</span>
+                            <strong id="metric-objects">0</strong>
+                        </article>
+                        <article class="metric">
+                            <span>Spesifikasjoner</span>
+                            <strong id="metric-specs">0</strong>
+                        </article>
+                        <article class="metric metric-alert">
+                            <span>Feilgrupper</span>
+                            <strong id="metric-groups">0</strong>
+                        </article>
+                        <article class="metric metric-ok">
+                            <span>Kontroller passert</span>
+                            <strong id="metric-passed">0</strong>
+                        </article>
+                    </div>
+
+                    <div id="run-status" class="run-status">
+                        Ingen validering kjort enna.
+                    </div>
+                </section>
+
+                <section class="panel groups-panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">3. Avvik</p>
+                            <h2>Grupperte valideringsfeil</h2>
+                        </div>
+                    </div>
+                    <div id="groups-root" class="group-list empty-state">
+                        Kjor en IDS-kontroll for a se grupperte avvik.
+                    </div>
+                </section>
+
+                <section class="panel diagnostics-panel">
+                    <div class="panel-head">
+                        <div>
+                            <p class="section-kicker">Diagnostikk</p>
+                            <h2>Oppdagede StreamBIM-metoder</h2>
+                        </div>
+                    </div>
+                    <div id="api-methods" class="method-list empty-state">
+                        Ingen metoder oppdaget enna.
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <script src="./streambim-widget-api.min.js"></script>
+        <script src="./app.js"></script>
+    </body>
+</html>

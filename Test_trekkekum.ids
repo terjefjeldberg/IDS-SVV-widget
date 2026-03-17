@@ -1,0 +1,653 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ids:ids xmlns:ids="http://standards.buildingsmart.org/IDS" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://standards.buildingsmart.org/IDS http://standards.buildingsmart.org/IDS/1.0/ids.xsd">
+  <ids:info>
+    <ids:title>SVVtest</ids:title>
+  </ids:info>
+  <ids:specifications>
+    <ids:specification ifcVersion="IFC2X3 IFC4 IFC4X3_ADD2" name="Kumform Betinget Rund">
+      <ids:applicability minOccurs="1" maxOccurs="unbounded">
+        <ids:property>
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Kumform_9738</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <ids:simpleValue>Rund</ids:simpleValue>
+          </ids:value>
+        </ids:property>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>BreddeYtre_9728</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value="^$" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>LengdeYtre_9739</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value="^$" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>DiameterYtre_9729</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+    <ids:specification ifcVersion="IFC2X3 IFC4 IFC4X3_ADD2" name="Kumform Betinget Rektangulær">
+      <ids:applicability minOccurs="1" maxOccurs="unbounded">
+        <ids:property>
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Kumform_9738</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <ids:simpleValue>Rektangulær</ids:simpleValue>
+          </ids:value>
+        </ids:property>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>DiameterYtre_9729</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value="^$" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>BreddeYtre_9728</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>LengdeYtre_9739</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+    <ids:specification ifcVersion="IFC2X3 IFC4 IFC4X3_ADD2" name="Kumform Betinget Kvadratisk">
+      <ids:applicability minOccurs="1" maxOccurs="unbounded">
+        <ids:property>
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Kumform_9738</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <ids:simpleValue>Kvadratisk</ids:simpleValue>
+          </ids:value>
+        </ids:property>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>DiameterYtre_9729</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value="^$" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>BreddeYtre_9728</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>LengdeYtre_9739</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+    <ids:specification ifcVersion="IFC4X3_ADD2" name="Trekkekum_853">
+      <ids:applicability minOccurs="0" maxOccurs="unbounded">
+        <ids:property>
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>BreddeYtre_9728</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>DiameterYtre_9729</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Arkivnummer_9730</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Bunn</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Forventet_levetid</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Betongkvalitet</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Utsparing</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Utsparingsstørrelse</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Eier_9732</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="Stat, Statens vegvesen" />
+              <xs:enumeration value="Fylkeskommune" />
+              <xs:enumeration value="Kommune" />
+              <xs:enumeration value="Privat" />
+              <xs:enumeration value="Uavklart" />
+              <xs:enumeration value="Stat, Nye Veier" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>EierNavn_9733</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>DybdeYtre_9737</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+              <xs:restriction base="xs:string">
+                  <xs:pattern value=".+" />
+              </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Kumform_9738</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="Kvadratisk" />
+              <xs:enumeration value="Rektangulær" />
+              <xs:enumeration value="Rund" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>LengdeYtre_9739</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>AntallRør_10840</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value="(0|[1-9][0-9]?|[1-2][0-9]{2}|300)" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Tilleggsinformasjon_11242</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Produsent_9734</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Produktnavn_9735</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Arkivreferanse_11701</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>FKB_ID_10859</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>RelevantForEkomporta_12450</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="Ja" />
+              <xs:enumeration value="Nei" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Plassering_9740</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="Bak betongrekkverk" />
+              <xs:enumeration value="I tunnelbankett" />
+              <xs:enumeration value="I terreng" />
+              <xs:enumeration value="På tunnelvegg innside" />
+              <xs:enumeration value="På tunnelvegg utside" />
+              <xs:enumeration value="I vegbane" />
+              <xs:enumeration value="I fjellrom/nisje" />
+              <xs:enumeration value="I g/s-veg" />
+              <xs:enumeration value="I fortau" />
+              <xs:enumeration value="I trafikkdeler" />
+              <xs:enumeration value="I vegskulder" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>MaterialeKum_9741</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="Betong" />
+              <xs:enumeration value="Betong, spesialprodusert" />
+              <xs:enumeration value="Plast" />
+              <xs:enumeration value="Stål" />
+              <xs:enumeration value="Skumglassplater" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Driftsmerking_9757</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+              <xs:restriction base="xs:string">
+                  <xs:pattern value=".+" />
+              </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>GeometriPunkt_9843</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+              <xs:restriction base="xs:string">
+                  <xs:pattern value=".+" />
+              </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Vedlikeholdsansvarli_10981</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="Statens vegvesen" />
+              <xs:enumeration value="Kommune" />
+              <xs:enumeration value="Privat" />
+              <xs:enumeration value="Uavklart" />
+              <xs:enumeration value="Nye Veier" />
+              <xs:enumeration value="OPS" />
+              <xs:enumeration value="Fylkeskommune" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>MaterialeLokk_11241</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="Betong" />
+              <xs:enumeration value="Plast" />
+              <xs:enumeration value="Støpjern" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Prosjektreferanse_11168</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Etableringsår_9731</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+              <xs:restriction base="xs:string">
+                  <xs:pattern value=".+" />
+              </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>ProsjektInternObjekt_12427</ids:simpleValue>
+          </ids:baseName>
+        </ids:property>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Brannsikker_9742</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="Ja" />
+              <xs:enumeration value="Nei" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+    <ids:specification ifcVersion="IFC2X3 IFC4 IFC4X3_ADD2" name="Privat eier sjekk">
+      <ids:applicability minOccurs="1" maxOccurs="unbounded">
+        <ids:property>
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Eier_9732</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <ids:simpleValue>Privat</ids:simpleValue>
+          </ids:value>
+        </ids:property>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>EierNavn_9733</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+    <ids:specification ifcVersion="IFC2X3 IFC4 IFC4X3_ADD2" name="Offentlig eier sjekk">
+      <ids:applicability minOccurs="1" maxOccurs="unbounded">
+        <ids:property>
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Eier_9732</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+              <xs:restriction base="xs:string">
+              <xs:enumeration value="Stat, Statens vegvesen" />
+              <xs:enumeration value="Stat, Nye Veier" />
+              <xs:enumeration value="Fylkeskommune" />
+              <xs:enumeration value="Kommune" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property cardinality="optional">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>EierNavn_9733</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value="^$" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+    <ids:specification ifcVersion="IFC2X3 IFC4 IFC4X3_ADD2" name="Nye veier vedlikeholdsansvarlig sjekk">
+      <ids:applicability minOccurs="1" maxOccurs="unbounded">
+        <ids:property>
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Eier_9732</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <ids:simpleValue>Stat, Nye Veier</ids:simpleValue>
+          </ids:value>
+        </ids:property>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property cardinality="required">
+          <ids:propertySet>
+            <ids:simpleValue>Trekkekum_853</ids:simpleValue>
+          </ids:propertySet>
+          <ids:baseName>
+            <ids:simpleValue>Vedlikeholdsansvarli_10981</ids:simpleValue>
+          </ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value=".+" />
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+  </ids:specifications>
+</ids:ids>
