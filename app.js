@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-17-searchapi-1";
+  var BUILD_ID = "2026-03-17-searchapi-2";
 
   var state = {
     streamBim: {
@@ -268,9 +268,20 @@
 
   async function fetchViaApplicabilitySearch(api, specs) {
     var searches = buildApplicabilitySearches(specs);
+    var seedSearches = buildApplicabilitySeedSearches(specs);
     var identities = {};
     var objects = [];
     var diagnostics = [];
+
+    if (!searches.length && !seedSearches.length) {
+      return {
+        objects: [],
+        diagnostic:
+          "Build " +
+          BUILD_ID +
+          ": IDS-applicability ga ingen konkrete property-sok. Verken eksakte verdier eller faste property-navn kunne utledes fra IDS-filen.",
+      };
+    }
 
     for (var i = 0; i < searches.length; i += 1) {
       var queryResult = await runFindObjectsQueries(api, searches[i]);
@@ -291,6 +302,27 @@
       }
     }
 
+    if (!objects.length) {
+      for (var k = 0; k < seedSearches.length; k += 1) {
+        var seedResult = await runFindObjectsQueries(api, seedSearches[k]);
+        var seedCandidates = extractObjectsFromResponse(seedResult.response);
+
+        if (!seedCandidates.length && seedResult.diagnostic) {
+          diagnostics.push(seedResult.diagnostic);
+        }
+
+        for (var l = 0; l < seedCandidates.length; l += 1) {
+          var seedHydrated = await bestEffortGetObjectInfo(api, seedCandidates[l]);
+          var seedIdentity = buildObjectIdentity(seedHydrated);
+          if (!seedIdentity || identities[seedIdentity]) {
+            continue;
+          }
+          identities[seedIdentity] = true;
+          objects.push(mergeObjectPayloads(seedCandidates[l], seedHydrated));
+        }
+      }
+    }
+
     return {
       objects: normalizeObjects(objects).objects,
       diagnostic: diagnostics.slice(0, 3).join(" | "),
@@ -299,10 +331,21 @@
 
   async function fetchViaObjectInfoSearch(api, specs) {
     var searches = buildApplicabilitySearches(specs);
+    var seedSearches = buildApplicabilitySeedSearches(specs);
     var identities = {};
     var objects = [];
     var diagnostics = [];
     var buildingId = await bestEffortGetBuildingId(api);
+
+    if (!searches.length && !seedSearches.length) {
+      return {
+        objects: [],
+        diagnostic:
+          "Build " +
+          BUILD_ID +
+          ": IDS-applicability ga ingen konkrete property-sok. Verken eksakte verdier eller faste property-navn kunne utledes fra IDS-filen.",
+      };
+    }
 
     for (var i = 0; i < searches.length; i += 1) {
       var queryResult = await runObjectInfoSearch(api, searches[i], buildingId);
@@ -320,6 +363,27 @@
         }
         identities[identity] = true;
         objects.push(mergeObjectPayloads(candidates[j], hydrated));
+      }
+    }
+
+    if (!objects.length) {
+      for (var k = 0; k < seedSearches.length; k += 1) {
+        var seedResult = await runObjectInfoSearch(api, seedSearches[k], buildingId);
+        var seedCandidates = extractObjectsFromResponse(seedResult.response);
+
+        if (!seedCandidates.length && seedResult.diagnostic) {
+          diagnostics.push(seedResult.diagnostic);
+        }
+
+        for (var l = 0; l < seedCandidates.length; l += 1) {
+          var seedHydrated = await bestEffortGetObjectInfo(api, seedCandidates[l]);
+          var seedIdentity = buildObjectIdentity(seedHydrated);
+          if (!seedIdentity || identities[seedIdentity]) {
+            continue;
+          }
+          identities[seedIdentity] = true;
+          objects.push(mergeObjectPayloads(seedCandidates[l], seedHydrated));
+        }
       }
     }
 
@@ -362,27 +426,30 @@
 
   function buildObjectInfoQueries(search, buildingId) {
     var queries = [];
-
-    queries.push({
-      filter: {
-        rules: [[{
-          buildingId: buildingId,
-          psetName: search.propertySet || undefined,
-          propKey: search.propertyName,
-          propValue: search.value,
-          operator: "=",
-        }]],
-      },
-      page: { limit: 1000, skip: 0 },
-      sort: { field: "Name", descending: false },
-    });
-
     var fallbackKeys = buildSearchKeys(search.propertySet, search.propertyName);
+
     for (var i = 0; i < fallbackKeys.length; i += 1) {
       queries.push({
         filter: { key: fallbackKeys[i], value: search.value },
         page: { limit: 1000, skip: 0 },
         sort: { field: "Name", descending: false },
+      });
+      queries.push({
+        key: fallbackKeys[i],
+        value: search.value,
+        page: { limit: 1000, skip: 0 },
+        sort: { field: "Name", descending: false },
+      });
+      queries.push({
+        filter: { key: fallbackKeys[i], value: search.value },
+        limit: 1000,
+        skip: 0,
+      });
+      queries.push({
+        key: fallbackKeys[i],
+        value: search.value,
+        limit: 1000,
+        skip: 0,
       });
     }
 
@@ -479,12 +546,41 @@
 
     specs.forEach(function (spec) {
       (spec.applicability || []).forEach(function (rule) {
-        var searchValue = buildSearchValue(rule.valueRule);
-        if (!rule.baseName || !searchValue) {
+        buildSearchValues(rule.valueRule).forEach(function (searchValue) {
+          if (!rule.baseName || !searchValue) {
+            return;
+          }
+
+          var key = [rule.propertySet || "", rule.baseName, searchValue].join("::");
+          if (seen[key]) {
+            return;
+          }
+
+          seen[key] = true;
+          searches.push({
+            propertySet: rule.propertySet || "",
+            propertyName: rule.baseName,
+            value: searchValue,
+          });
+        });
+      });
+    });
+
+    return searches;
+  }
+
+  function buildApplicabilitySeedSearches(specs) {
+    var seen = {};
+    var searches = [];
+    var fallbackSearches = [];
+
+    specs.forEach(function (spec) {
+      (spec.applicability || []).forEach(function (rule) {
+        if (!rule.baseName) {
           return;
         }
 
-        var key = [rule.propertySet || "", rule.baseName, searchValue].join("::");
+        var key = [rule.propertySet || "", rule.baseName].join("::");
         if (seen[key]) {
           return;
         }
@@ -493,19 +589,57 @@
         searches.push({
           propertySet: rule.propertySet || "",
           propertyName: rule.baseName,
-          value: searchValue,
+          value: "",
+          isSeedSearch: true,
         });
       });
     });
 
-    return searches;
+    if (searches.length) {
+      return searches;
+    }
+
+    specs.forEach(function (spec) {
+      (spec.requirements || []).forEach(function (rule) {
+        if (!rule.baseName) {
+          return;
+        }
+
+        var key = [rule.propertySet || "", rule.baseName].join("::");
+        if (seen[key]) {
+          return;
+        }
+
+        seen[key] = true;
+        fallbackSearches.push({
+          propertySet: rule.propertySet || "",
+          propertyName: rule.baseName,
+          value: "",
+          isSeedSearch: true,
+        });
+      });
+    });
+
+    return fallbackSearches.slice(0, 8);
   }
 
-  function buildSearchValue(valueRule) {
-    if (!valueRule || valueRule.type !== "equals") {
-      return "";
+  function buildSearchValues(valueRule) {
+    if (!valueRule) {
+      return [];
     }
-    return stringifyValue(valueRule.value).trim();
+    if (valueRule.type === "equals") {
+      return [stringifyValue(valueRule.value).trim()].filter(Boolean);
+    }
+    if (valueRule.type === "oneOf") {
+      return uniqueStrings(
+        (valueRule.values || [])
+          .map(function (value) {
+            return stringifyValue(value).trim();
+          })
+          .filter(Boolean),
+      );
+    }
+    return [];
   }
 
   async function runFindObjectsQueries(api, search) {
@@ -536,7 +670,7 @@
         "." +
         search.propertyName +
         "=" +
-        search.value +
+        (search.value === "" ? "<tomt sok>" : search.value) +
         ". Provde nokler: " +
         candidateKeys.join(", "),
       matchedKey: "",
@@ -548,6 +682,10 @@
     return uniqueStrings([
       propertySet ? propertySet + "~" + propertyName : "",
       propertySet ? propertySet + "." + propertyName : "",
+      propertySet ? propertySet + ":" + propertyName : "",
+      propertySet ? propertySet + "/" + propertyName : "",
+      propertySet ? propertySet + ">" + propertyName : "",
+      propertySet ? propertySet + " - " + propertyName : "",
       propertyName,
     ]).filter(Boolean);
   }
@@ -1009,6 +1147,21 @@
     }
 
     if (restriction) {
+      var enumerationNodes = restriction.getElementsByTagNameNS(
+        "http://www.w3.org/2001/XMLSchema",
+        "enumeration",
+      );
+      if (enumerationNodes.length) {
+        return {
+          type: "oneOf",
+          values: Array.prototype.slice.call(enumerationNodes)
+            .map(function (node) {
+              return node.getAttribute("value") || "";
+            })
+            .filter(Boolean),
+        };
+      }
+
       var patternNodes = restriction.getElementsByTagNameNS(
         "http://www.w3.org/2001/XMLSchema",
         "pattern",
@@ -1233,6 +1386,12 @@
       );
     }
 
+    if (valueRule.type === "oneOf") {
+      return (valueRule.values || []).some(function (value) {
+        return normalizeComparisonText(actual) === normalizeComparisonText(value);
+      });
+    }
+
     if (valueRule.type === "pattern") {
       try {
         return new RegExp(valueRule.value).test(actual);
@@ -1366,6 +1525,9 @@
     }
     if (valueRule.type === "equals") {
       return 'Lik "' + valueRule.value + '"';
+    }
+    if (valueRule.type === "oneOf") {
+      return "En av: " + (valueRule.values || []).join(", ");
     }
     if (valueRule.type === "pattern") {
       return "Matcher /" + valueRule.value + "/";
