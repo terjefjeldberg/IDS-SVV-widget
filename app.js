@@ -202,22 +202,22 @@
     renderApiMethods();
 
     if (
-      typeof api.findObjects === "function" &&
-      typeof api.getObjectInfo === "function"
-    ) {
-      var targeted = await fetchViaApplicabilitySearch(api, specs);
-      if (targeted.objects.length) {
-        return targeted;
-      }
-    }
-
-    if (
       typeof api.getObjectInfoForSearch === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
       var targetedSearch = await fetchViaObjectInfoSearch(api, specs);
       if (targetedSearch.objects.length) {
         return targetedSearch;
+      }
+    }
+
+    if (
+      typeof api.findObjects === "function" &&
+      typeof api.getObjectInfo === "function"
+    ) {
+      var targeted = await fetchViaApplicabilitySearch(api, specs);
+      if (targeted.objects.length) {
+        return targeted;
       }
     }
 
@@ -417,21 +417,39 @@
   }
 
   async function runObjectInfoSearchQueries(api, search, pageSize, skip) {
+    var rulesQuery = {
+      filter: {
+        rules: [
+          [
+            {
+              psetName: search.propertySet || undefined,
+              propKey: search.propertyName,
+              propValue: search.value,
+              operator: "=",
+            },
+          ],
+        ],
+      },
+      page: { limit: pageSize, skip: skip },
+      sort: { field: "Name", descending: false },
+    };
+
+    try {
+      var directResponse = await api.getObjectInfoForSearch(rulesQuery);
+      if (extractObjectsFromResponse(directResponse).length) {
+        return directResponse;
+      }
+    } catch (error) {}
+
     var candidateKeys = buildSearchKeys(search.propertySet, search.propertyName);
 
     for (var i = 0; i < candidateKeys.length; i += 1) {
       try {
-        var response = await invokeMethodGuessing(api, "getObjectInfoForSearch", [
-          {
-            filter: { key: candidateKeys[i], value: search.value },
-            page: { limit: pageSize, skip: skip },
-          },
-          {
-            filter: { key: candidateKeys[i], value: search.value },
-            page: { limit: pageSize, skip: skip },
-            sort: { field: candidateKeys[i], descending: false },
-          },
-        ]);
+        var response = await api.getObjectInfoForSearch({
+          filter: { key: candidateKeys[i], value: search.value },
+          page: { limit: pageSize, skip: skip },
+          sort: { field: "Name", descending: false },
+        });
         if (extractObjectsFromResponse(response).length) {
           return response;
         }
@@ -443,6 +461,7 @@
 
   function buildSearchKeys(propertySet, propertyName) {
     return [
+      propertySet ? propertySet + "~" + propertyName : "",
       propertyName,
       propertySet ? propertySet + "." + propertyName : "",
       propertySet ? propertySet + ":" + propertyName : "",
