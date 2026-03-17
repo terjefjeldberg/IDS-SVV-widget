@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-17-bef9c6c-2";
+  var BUILD_ID = "2026-03-17-ifcapi-1";
 
   var state = {
     streamBim: {
@@ -214,7 +214,23 @@
     state.streamBim.methods = listCallableMethods(api);
     renderApiMethods();
 
+    var diagnostics = [];
     var targeted = { objects: [], diagnostic: "" };
+
+    if (
+      typeof api.makeApiRequest === "function" &&
+      typeof api.getProjectId === "function" &&
+      typeof api.getObjectInfo === "function"
+    ) {
+      targeted = await fetchViaIfcSearchApi(api, specs);
+      if (targeted.objects.length) {
+        return targeted;
+      }
+      if (targeted.diagnostic) {
+        diagnostics.push(targeted.diagnostic);
+      }
+    }
+
     if (
       typeof api.findObjects === "function" &&
       typeof api.getObjectInfo === "function"
@@ -222,6 +238,9 @@
       targeted = await fetchViaApplicabilitySearch(api, specs);
       if (targeted.objects.length) {
         return targeted;
+      }
+      if (targeted.diagnostic) {
+        diagnostics.push(targeted.diagnostic);
       }
     }
 
@@ -243,7 +262,7 @@
     return {
       objects: [],
       diagnostic:
-        targeted.diagnostic ||
+        diagnostics.filter(Boolean).slice(0, 3).join(" | ") ||
         "Build " + BUILD_ID + ": Widgeten fant ingen IDS-treff via StreamBIM-sok, og denne prosjektkonfigurasjonen tilbyr ingen fullmodell-metode for widgeter.",
     };
   }
@@ -279,6 +298,228 @@
     };
   }
 
+  async function fetchViaIfcSearchApi(api, specs) {
+    var searches = buildApplicabilitySearches(specs);
+    var identities = {};
+    var objects = [];
+    var diagnostics = [];
+    var context = await createIfcApiContext(api);
+
+    if (!context.apiBases.length) {
+      return {
+        objects: [],
+        diagnostic: "Build " + BUILD_ID + ": Klarte ikke etablere IFC API-kontekst for StreamBIM-sok.",
+      };
+    }
+
+    for (var i = 0; i < searches.length; i += 1) {
+      var queryResult = await runIfcApiSearch(api, context, searches[i]);
+      var guids = extractGuidsFromExportResponse(queryResult.response);
+
+      if (!guids.length && queryResult.diagnostic) {
+        diagnostics.push(queryResult.diagnostic);
+      }
+
+      for (var j = 0; j < guids.length; j += 1) {
+        var hydrated = await bestEffortGetObjectInfo(api, guids[j]);
+        var identity = buildObjectIdentity(hydrated) || stringifyValue(guids[j]);
+        if (!identity || identities[identity]) {
+          continue;
+        }
+        identities[identity] = true;
+        objects.push(mergeObjectPayloads({ guid: stringifyValue(guids[j]) }, hydrated));
+      }
+    }
+
+    return {
+      objects: normalizeObjects(objects).objects,
+      diagnostic: diagnostics.slice(0, 3).join(" | "),
+    };
+  }
+
+  async function createIfcApiContext(api) {
+    var projectId = "";
+    var buildingId = "1000";
+
+    try {
+      projectId = stringifyValue(await api.getProjectId()).trim();
+    } catch (error) {}
+
+    try {
+      var resolvedBuildingId = stringifyValue(await api.getBuildingId()).trim();
+      if (resolvedBuildingId) {
+        buildingId = resolvedBuildingId;
+      }
+    } catch (error) {}
+
+    return {
+      projectId: projectId,
+      buildingId: buildingId,
+      apiBases: buildIfcApiBaseCandidates(projectId),
+    };
+  }
+
+  async function runIfcApiSearch(api, context, search) {
+    var errors = [];
+    var ruleVariants = buildIfcApiRuleVariants(context.buildingId, search);
+
+    for (var i = 0; i < context.apiBases.length; i += 1) {
+      for (var j = 0; j < ruleVariants.length; j += 1) {
+        try {
+          var createResponse = await makeApiJsonRequest(api, {
+            url: context.apiBases[i] + "/ifc-searches",
+            method: "POST",
+            accept: "application/json",
+            contentType: "application/json",
+            body: { rules: [[ruleVariants[j]]] },
+          });
+          var searchId = extractSearchId(createResponse);
+          if (!searchId) {
+            continue;
+          }
+
+          var exportResponse = await makeApiJsonRequest(api, {
+            url:
+              context.apiBases[i] +
+              "/ifc-searches/export/json?searchId=" +
+              encodeURIComponent(searchId) +
+              "&fieldUnion=true&fieldNames=" +
+              encodeURIComponent(base64Encode("GUID|Name|GlobalId|Type")) +
+              "&page[limit]=1000&page[skip]=0",
+            method: "GET",
+            accept: "application/json",
+          });
+
+          if (extractGuidsFromExportResponse(exportResponse).length) {
+            return {
+              response: exportResponse,
+              diagnostic: "",
+            };
+          }
+        } catch (error) {
+          errors.push(getErrorMessage(error));
+        }
+      }
+    }
+
+    return {
+      response: [],
+      diagnostic:
+        "IFC API fant ingen treff for " +
+        search.propertySet +
+        "." +
+        search.propertyName +
+        "=" +
+        search.value +
+        (errors.length ? " (siste feil: " + errors[errors.length - 1] + ")" : ""),
+    };
+  }
+
+  function buildIfcApiBaseCandidates(projectId) {
+    var cleanedProjectId = String(projectId || "")
+      .trim()
+      .replace(/^\/+|\/+$/g, "");
+
+    if (!cleanedProjectId) {
+      return ["/api/v1"];
+    }
+
+    var projectSegment = cleanedProjectId;
+    if (/^\d+$/.test(projectSegment)) {
+      projectSegment = "project-" + projectSegment;
+    }
+
+    return uniqueStrings([
+      "/" + projectSegment + "/api/v1",
+      "/pgw/" + projectSegment + "/api/v1",
+      "/api/v1",
+    ]);
+  }
+
+  function buildIfcApiRuleVariants(buildingId, search) {
+    return [
+      {
+        buildingId: buildingId,
+        psetName: search.propertySet || undefined,
+        propKey: search.propertyName,
+        propValue: search.value,
+        operator: "=",
+      },
+      {
+        buildingId: buildingId,
+        propKey: search.propertySet
+          ? search.propertySet + "." + search.propertyName
+          : search.propertyName,
+        propValue: search.value,
+        operator: "=",
+      },
+      {
+        buildingId: buildingId,
+        propKey: search.propertySet
+          ? search.propertySet + "~" + search.propertyName
+          : search.propertyName,
+        propValue: search.value,
+        operator: "=",
+      },
+      {
+        buildingId: buildingId,
+        propKey: search.propertyName,
+        propValue: search.value,
+        operator: "=",
+      },
+    ];
+  }
+
+  async function makeApiJsonRequest(api, request) {
+    var rawResponse = await api.makeApiRequest(request);
+    if (!rawResponse) {
+      return {};
+    }
+    if (typeof rawResponse === "string") {
+      try {
+        return JSON.parse(rawResponse);
+      } catch (error) {
+        return { raw: rawResponse };
+      }
+    }
+    return rawResponse;
+  }
+
+  function extractSearchId(response) {
+    return firstNonEmpty([
+      response && response.searchId,
+      response && response.id,
+      response && response.data && response.data.searchId,
+      response && response.data && response.data.id,
+    ]);
+  }
+
+  function extractGuidsFromExportResponse(response) {
+    return uniqueStrings(
+      extractObjectsFromResponse(response)
+        .map(function (item) {
+          if (typeof item === "string") {
+            return item;
+          }
+          return firstNonEmpty([
+            item.GUID,
+            item.guid,
+            item.GlobalId,
+            item.globalId,
+            item.ifcGuid,
+            buildObjectIdentity(item),
+          ]);
+        })
+        .filter(Boolean),
+    );
+  }
+
+  function base64Encode(value) {
+    if (typeof btoa === "function") {
+      return btoa(value);
+    }
+    return value;
+  }
 
   async function fetchViaGenericObjectMethods(api) {
     var objectMethods = [
