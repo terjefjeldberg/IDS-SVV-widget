@@ -1,4 +1,4 @@
-﻿:root {
+:root {
     --bg: #f4efe6;
     --bg-strong: #efe3cf;
     --surface: rgba(255, 251, 245, 0.88);
@@ -268,6 +268,45 @@ input {
 .method-list {
     display: grid;
     gap: 14px;
+}
+
+.scope-section {
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.48);
+    border-radius: 24px;
+    padding: 16px;
+}
+
+.scope-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: start;
+    margin-bottom: 14px;
+}
+
+.scope-title {
+    margin: 0 0 6px;
+    font-size: 1.14rem;
+    font-weight: 800;
+}
+
+.scope-meta {
+    margin: 0;
+    color: var(--muted);
+}
+
+.scope-groups {
+    display: grid;
+    gap: 12px;
+}
+
+.scope-empty {
+    padding: 16px 18px;
+    border: 1px dashed var(--line);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.62);
+    color: var(--muted);
 }
 
 .group-card {

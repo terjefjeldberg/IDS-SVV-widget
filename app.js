@@ -166,19 +166,28 @@
       var report = validateObjects(specs, modelData.objects);
       state.validation = report;
       renderSummary(report);
-      renderGroups(report.groups);
-      setRunStatus(
-        "Validering ferdig. " +
-          report.groups.length +
-          " feilgrupper opprettet fra " +
-          report.summary.failedChecks +
-          " avvik.",
-        report.groups.length ? "state-warn" : "state-ok",
-      );
+      renderGroups(report);
+      if (!report.summary.applicableObjectCount) {
+        setRunStatus(
+          "Validering ferdig, men ingen objekter matchet IDS applicability. Dette tyder pa at property-navnene fra StreamBIM fortsatt ikke treffer IDS-en.",
+          "state-warn",
+        );
+      } else {
+        setRunStatus(
+          "Validering ferdig. " +
+            report.summary.scopeCount +
+            " modellag sjekket, " +
+            report.groups.length +
+            " feilgrupper opprettet fra " +
+            report.summary.failedChecks +
+            " avvik.",
+          report.groups.length ? "state-warn" : "state-ok",
+        );
+      }
     } catch (error) {
       state.validation = null;
       renderSummary(null);
-      renderGroups([]);
+      renderGroups(null);
       setRunStatus(getErrorMessage(error), "state-error");
     } finally {
       toggleBusy(false);
@@ -1051,56 +1060,90 @@
     els.metricPassed.textContent = String(report.summary.passedChecks);
   }
 
-  function renderGroups(groups) {
-    if (!groups || !groups.length) {
+  function renderGroups(report) {
+    if (!report || !report.scopes || !report.scopes.length) {
       els.groupsRoot.className = "group-list empty-state";
       els.groupsRoot.textContent = "Ingen grupperte avvik a vise.";
       return;
     }
 
     els.groupsRoot.className = "group-list";
-    els.groupsRoot.innerHTML = groups
-      .map(function (group, index) {
+    els.groupsRoot.innerHTML = report.scopes
+      .map(function (scope) {
         return [
-          '<article class="group-card">',
-          '  <div class="group-head">',
+          '<section class="scope-section">',
+          '  <div class="scope-head">',
           "    <div>",
-          '      <p class="group-title">' + escapeHtml(group.title) + "</p>",
-          '      <div class="group-code">' +
-            escapeHtml(group.propertySet + "." + group.propertyName) +
-            "</div>",
-          '      <p class="group-meta">' +
-            escapeHtml(group.description) +
+          '      <p class="scope-title">' + escapeHtml(scope.scopeLabel) + "</p>",
+          '      <p class="scope-meta">' +
+            escapeHtml(
+              scope.objectCount +
+                " objekter, " +
+                scope.summary.applicableObjectCount +
+                " matcher IDS applicability, " +
+                scope.groups.length +
+                " feilgrupper",
+            ) +
             "</p>",
           "    </div>",
-          '    <div class="badge">' + group.objects.length + " treff</div>",
+          '    <div class="badge">' + scope.summary.failedChecks + " avvik</div>",
           "  </div>",
-          '  <div class="group-body">',
-          '      <div class="group-actions">',
-          '          <button class="btn btn-primary" type="button" data-action="create-bcf" data-group-index="' +
-            index +
-            '">Opprett BCF</button>',
-          "      </div>",
-          '      <ol class="object-list">' +
-            group.objects
-              .map(function (object) {
-                return (
-                  "<li><strong>" +
-                  escapeHtml(object.name) +
-                  "</strong> (" +
-                  escapeHtml(object.type) +
-                  ")" +
-                  (object.guid ? " GUID: " + escapeHtml(object.guid) : "") +
-                  "<br />Forventet: " +
-                  escapeHtml(object.expectedValue) +
-                  " | Faktisk: " +
-                  escapeHtml(object.actualValue || "[mangler]")
-                );
-              })
-              .join("</li>") +
-            "</li></ol>",
-          "  </div>",
-          "</article>",
+          '  <div class="scope-groups">' +
+            (scope.groups.length
+              ? scope.groups
+                  .map(function (group) {
+                    return [
+                      '<article class="group-card">',
+                      '  <div class="group-head">',
+                      "    <div>",
+                      '      <p class="group-title">' +
+                        escapeHtml(group.title) +
+                        "</p>",
+                      '      <div class="group-code">' +
+                        escapeHtml(group.propertySet + "." + group.propertyName) +
+                        "</div>",
+                      '      <p class="group-meta">' +
+                        escapeHtml(group.description) +
+                        "</p>",
+                      "    </div>",
+                      '    <div class="badge">' +
+                        group.objects.length +
+                        " treff</div>",
+                      "  </div>",
+                      '  <div class="group-body">',
+                      '      <div class="group-actions">',
+                      '          <button class="btn btn-primary" type="button" data-action="create-bcf" data-group-index="' +
+                        group.globalIndex +
+                        '">Opprett BCF</button>',
+                      "      </div>",
+                      '      <ol class="object-list">' +
+                        group.objects
+                          .map(function (object) {
+                            return (
+                              "<li><strong>" +
+                              escapeHtml(object.name) +
+                              "</strong> (" +
+                              escapeHtml(object.type) +
+                              ")" +
+                              (object.guid
+                                ? " GUID: " + escapeHtml(object.guid)
+                                : "") +
+                              "<br />Forventet: " +
+                              escapeHtml(object.expectedValue) +
+                              " | Faktisk: " +
+                              escapeHtml(object.actualValue || "[mangler]")
+                            );
+                          })
+                          .join("</li>") +
+                        "</li></ol>",
+                      "  </div>",
+                      "</article>",
+                    ].join("");
+                  })
+                  .join("")
+              : '<div class="scope-empty">Ingen avvik funnet i dette modellaget.</div>') +
+            "</div>",
+          "</section>",
         ].join("");
       })
       .join("");
@@ -1123,7 +1166,11 @@
     try {
       await createBcfIssue(group);
       setRunStatus(
-        'BCF opprettet for gruppen "' + group.title + '".',
+        'BCF opprettet for gruppen "' +
+          group.title +
+          '" i ' +
+          group.scopeLabel +
+          ".",
         "state-ok",
       );
     } catch (error) {
@@ -1176,9 +1223,15 @@
     }
 
     var payload = {
-      title: group.title,
+      title: group.scopeLabel + ": " + group.title,
       description:
         group.description +
+        "\n\nModellag: " +
+        group.scopeLabel +
+        "\nModel: " +
+        (group.modelName || "-") +
+        "\nLayer: " +
+        (group.layerName || "-") +
         "\n\nSpec: " +
         group.specName +
         "\nProperty: " +
@@ -1187,7 +1240,13 @@
         group.propertyName +
         "\nAntall objekter: " +
         group.objects.length,
-      labels: ["IDS", "SVV", group.propertySet, group.propertyName],
+      labels: [
+        "IDS",
+        "SVV",
+        sanitizeLabel(group.scopeLabel),
+        group.propertySet,
+        group.propertyName,
+      ],
       objects: group.objects.map(function (object) {
         return {
           guid: object.guid,
