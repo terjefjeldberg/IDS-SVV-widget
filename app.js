@@ -1,8 +1,9 @@
-﻿(function () {
+(function () {
   "use strict";
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
+
   var state = {
     streamBim: {
       connected: false,
@@ -52,10 +53,10 @@
   function connectToStreamBim() {
     setConnectionState("Kobler til", "Venter pa parent frame", "");
     window.StreamBIM.connect({})
-      .then(function (api) {
+      .then(function () {
         state.streamBim.connected = true;
         state.streamBim.api = window.StreamBIM;
-        state.streamBim.methods = listCallableMethods(state.streamBim.api);
+        state.streamBim.methods = listCallableMethods(window.StreamBIM);
         renderApiMethods();
         setConnectionState(
           "Tilkoblet",
@@ -104,6 +105,7 @@
     if (!file) {
       return;
     }
+
     readTextFile(file)
       .then(function (text) {
         state.idsText = text;
@@ -167,6 +169,7 @@
       state.validation = report;
       renderSummary(report);
       renderGroups(report);
+
       if (!report.summary.applicableObjectCount) {
         setRunStatus(
           "Validering ferdig, men ingen objekter matchet IDS applicability. Dette tyder pa at property-navnene fra StreamBIM fortsatt ikke treffer IDS-en.",
@@ -202,16 +205,95 @@
       typeof api.findObjects === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
-      return fetchViaApplicabilitySearch(api, specs);
+      var targeted = await fetchViaApplicabilitySearch(api, specs);
+      if (targeted.objects.length) {
+        return targeted;
+      }
     }
 
     if (
       typeof api.getObjectInfoForSearch === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
-      return fetchViaObjectInfoSearch(api, specs);
+      var targetedSearch = await fetchViaObjectInfoSearch(api, specs);
+      if (targetedSearch.objects.length) {
+        return targetedSearch;
+      }
     }
 
+    return fetchViaGenericObjectMethods(api);
+  }
+
+  async function fetchViaApplicabilitySearch(api, specs) {
+    var searches = buildApplicabilitySearches(specs);
+    var identities = {};
+    var objects = [];
+
+    for (var i = 0; i < searches.length; i += 1) {
+      var response = await runFindObjectsQueries(api, searches[i]);
+      var candidates = extractObjectsFromResponse(response);
+
+      for (var j = 0; j < candidates.length; j += 1) {
+        var hydrated = await bestEffortGetObjectInfo(api, candidates[j]);
+        var identity = buildObjectIdentity(hydrated);
+        if (!identity || identities[identity]) {
+          continue;
+        }
+        identities[identity] = true;
+        objects.push(mergeObjectPayloads(candidates[j], hydrated));
+      }
+    }
+
+    return { objects: normalizeObjects(objects).objects };
+  }
+
+  async function fetchViaObjectInfoSearch(api, specs) {
+    var searches = buildApplicabilitySearches(specs);
+    var identities = {};
+    var objects = [];
+
+    for (var i = 0; i < searches.length; i += 1) {
+      var pageSize = 200;
+      var skip = 0;
+      var pageIndex = 0;
+      var lastSignature = "";
+
+      while (pageIndex < 100) {
+        var response = await runObjectInfoSearchQueries(api, searches[i], pageSize, skip);
+        var pageObjects = extractObjectsFromResponse(response);
+        if (!pageObjects.length) {
+          break;
+        }
+
+        var signature = buildPageSignature(pageObjects);
+        if (pageIndex > 0 && signature && signature === lastSignature) {
+          break;
+        }
+
+        for (var j = 0; j < pageObjects.length; j += 1) {
+          var hydrated = await bestEffortGetObjectInfo(api, pageObjects[j]);
+          var identity = buildObjectIdentity(hydrated);
+          if (!identity || identities[identity]) {
+            continue;
+          }
+          identities[identity] = true;
+          objects.push(mergeObjectPayloads(pageObjects[j], hydrated));
+        }
+
+        lastSignature = signature;
+        if (pageObjects.length < pageSize) {
+          break;
+        }
+
+        skip += pageSize;
+        pageIndex += 1;
+      }
+    }
+
+    return { objects: normalizeObjects(objects).objects };
+  }
+
+  async function fetchViaGenericObjectMethods(api) {
     var objectMethods = [
       "getObjectsWithProperties",
       "getModelObjectsWithProperties",
@@ -259,9 +341,7 @@
 
     var propertyMethod = firstAvailableMethod(api, propertyMethods);
     if (!propertyMethod) {
-      throw new Error(
-        "Modellobjektene ble lest, men ingen property-metode ble funnet for videre validering.",
-      );
+      return { objects: normalized.objects };
     }
 
     var hydrated = [];
@@ -280,34 +360,6 @@
     }
 
     return { objects: hydrated };
-  }
-
-  async function fetchViaApplicabilitySearch(api, specs) {
-    var searches = buildApplicabilitySearches(specs);
-    var seenGuids = {};
-    var guids = [];
-
-    for (var i = 0; i < searches.length; i += 1) {
-      var response = await runFindObjectsQueries(api, searches[i]);
-      var searchGuids = extractGuidsFromResponse(response);
-      for (var j = 0; j < searchGuids.length; j += 1) {
-        if (!seenGuids[searchGuids[j]]) {
-          seenGuids[searchGuids[j]] = true;
-          guids.push(searchGuids[j]);
-        }
-      }
-    }
-
-    if (!guids.length) {
-      return { objects: [] };
-    }
-
-    var objects = [];
-    for (var k = 0; k < guids.length; k += 1) {
-      objects.push(await api.getObjectInfo(guids[k]));
-    }
-
-    return { objects: normalizeObjects(await hydrateObjects(api, objects)).objects };
   }
 
   function buildApplicabilitySearches(specs) {
@@ -346,20 +398,16 @@
   }
 
   async function runFindObjectsQueries(api, search) {
-    var candidateKeys = [
-      search.propertyName,
-      search.propertySet ? search.propertySet + "." + search.propertyName : "",
-      search.propertySet ? search.propertySet + ":" + search.propertyName : "",
-      search.propertySet ? search.propertySet + "/" + search.propertyName : "",
-    ].filter(Boolean);
+    var candidateKeys = buildSearchKeys(search.propertySet, search.propertyName);
 
     for (var i = 0; i < candidateKeys.length; i += 1) {
       try {
         var response = await invokeMethodGuessing(api, "findObjects", [
           { key: candidateKeys[i], value: search.value, limit: 1000 },
           { key: candidateKeys[i], value: search.value },
+          { filter: { key: candidateKeys[i], value: search.value }, limit: 1000 },
         ]);
-        if (extractGuidsFromResponse(response).length) {
+        if (extractObjectsFromResponse(response).length) {
           return response;
         }
       } catch (error) {}
@@ -368,143 +416,112 @@
     return [];
   }
 
-  async function fetchViaObjectInfoSearch(api, specs) {
-    var pageSize = 200;
-    var allObjects = [];
-    var searches = buildApplicabilitySearches(specs);
+  async function runObjectInfoSearchQueries(api, search, pageSize, skip) {
+    var candidateKeys = buildSearchKeys(search.propertySet, search.propertyName);
 
-    if (!searches.length) {
-      return { objects: [] };
-    }
-
-    for (var searchIndex = 0; searchIndex < searches.length; searchIndex += 1) {
-      var skip = 0;
-      var pageIndex = 0;
-      var lastSignature = "";
-
-      while (pageIndex < 100) {
+    for (var i = 0; i < candidateKeys.length; i += 1) {
+      try {
         var response = await invokeMethodGuessing(api, "getObjectInfoForSearch", [
           {
-            filter: {
-              key: searches[searchIndex].propertyName,
-              value: searches[searchIndex].value,
-            },
+            filter: { key: candidateKeys[i], value: search.value },
             page: { limit: pageSize, skip: skip },
           },
           {
-            filter: {
-              key:
-                searches[searchIndex].propertySet +
-                "." +
-                searches[searchIndex].propertyName,
-              value: searches[searchIndex].value,
-            },
+            filter: { key: candidateKeys[i], value: search.value },
             page: { limit: pageSize, skip: skip },
-          },
-          {
-            filter: {
-              key:
-                searches[searchIndex].propertySet +
-                ":" +
-                searches[searchIndex].propertyName,
-              value: searches[searchIndex].value,
-            },
-            page: { limit: pageSize, skip: skip },
+            sort: { field: candidateKeys[i], descending: false },
           },
         ]);
-        var pageObjects = extractObjectsFromResponse(response);
-        if (!pageObjects.length) {
-          break;
+        if (extractObjectsFromResponse(response).length) {
+          return response;
         }
-
-        var signature = buildPageSignature(pageObjects);
-        if (pageIndex > 0 && signature && signature === lastSignature) {
-          break;
-        }
-
-        allObjects = allObjects.concat(pageObjects);
-        lastSignature = signature;
-        if (pageObjects.length < pageSize) {
-          break;
-        }
-
-        skip += pageSize;
-        pageIndex += 1;
-      }
+      } catch (error) {}
     }
 
-    if (!allObjects.length) {
-      return { objects: [] };
-    }
-
-    return { objects: normalizeObjects(await hydrateObjects(api, allObjects)).objects };
+    return [];
   }
 
-  async function fetchViaFindObjects(api) {
-    var pageSize = 200;
-    var skip = 0;
-    var pageIndex = 0;
-    var allGuids = [];
-    var lastSignature = "";
+  function buildSearchKeys(propertySet, propertyName) {
+    return [
+      propertyName,
+      propertySet ? propertySet + "." + propertyName : "",
+      propertySet ? propertySet + ":" + propertyName : "",
+      propertySet ? propertySet + "/" + propertyName : "",
+      propertySet ? propertySet + ">" + propertyName : "",
+      propertySet ? propertySet + " - " + propertyName : "",
+    ].filter(Boolean);
+  }
 
-    while (pageIndex < 100) {
-      var response = await invokeMethodGuessing(api, "findObjects", [
-        {
-          key: "Name",
-          value: "",
-          limit: pageSize,
-          skip: skip,
-        },
-        {
-          key: "ID",
-          value: "",
-          limit: pageSize,
-          skip: skip,
-        },
-        {
-          filter: { key: "Name", value: "" },
-          page: { limit: pageSize, skip: skip },
-          sort: { field: "Name", descending: false },
-        },
-        {
-          filter: { key: "ID", value: "" },
-          page: { limit: pageSize, skip: skip },
-          sort: { field: "ID", descending: false },
-        },
-      ]);
-      var pageGuids = extractGuidsFromResponse(response);
-      if (!pageGuids.length) {
-        break;
-      }
-
-      var signature = pageGuids.slice(0, 10).join("|");
-      if (pageIndex > 0 && signature && signature === lastSignature) {
-        break;
-      }
-
-      allGuids = allGuids.concat(pageGuids);
-      lastSignature = signature;
-      if (pageGuids.length < pageSize) {
-        break;
-      }
-
-      skip += pageSize;
-      pageIndex += 1;
+  async function hydrateObjects(api, objects) {
+    if (!api || typeof api.getObjectInfo !== "function") {
+      return objects;
     }
 
-    if (!allGuids.length) {
-      throw new Error(
-        "StreamBIM svarte, men returnerte ingen GUID-er fra findObjects.",
-      );
+    var hydrated = [];
+    for (var i = 0; i < objects.length; i += 1) {
+      var detail = await bestEffortGetObjectInfo(api, objects[i]);
+      hydrated.push(mergeObjectPayloads(objects[i], detail));
+    }
+    return hydrated;
+  }
+
+  async function bestEffortGetObjectInfo(api, object) {
+    var candidates = [];
+    var guid = pickFirst(object || {}, ["guid", "globalId", "ifcGuid", "GlobalId"]);
+    var id = pickFirst(object || {}, ["id", "objectId", "dbId", "expressId"]);
+
+    if (guid) {
+      candidates.push(guid);
+    }
+    if (id && id !== guid) {
+      candidates.push(id);
+    }
+    candidates.push(object);
+
+    for (var i = 0; i < candidates.length; i += 1) {
+      try {
+        return await api.getObjectInfo(candidates[i]);
+      } catch (error) {}
     }
 
-    var objects = [];
-    for (var i = 0; i < allGuids.length; i += 1) {
-      var guid = allGuids[i];
-      objects.push(await api.getObjectInfo(guid));
+    return object;
+  }
+
+  function mergeObjectPayloads(baseObject, detailObject) {
+    if (!detailObject || detailObject === baseObject) {
+      return baseObject;
     }
 
-    return { objects: normalizeObjects(objects).objects };
+    var merged = Object.assign({}, baseObject || {}, detailObject || {});
+    var mergeKeys = ["propertySets", "psets", "properties", "propertySetData", "data"];
+
+    mergeKeys.forEach(function (key) {
+      var left = baseObject && baseObject[key];
+      var right = detailObject && detailObject[key];
+
+      if (Array.isArray(left) || Array.isArray(right)) {
+        merged[key] = coerceArray(left).concat(coerceArray(right));
+        return;
+      }
+
+      if (left && right && typeof left === "object" && typeof right === "object") {
+        merged[key] = Object.assign({}, left, right);
+      }
+    });
+
+    return merged;
+  }
+
+  function buildObjectIdentity(object) {
+    if (!object || typeof object !== "object") {
+      return "";
+    }
+
+    return (
+      pickFirst(object, ["guid", "globalId", "ifcGuid", "GlobalId"]) ||
+      pickFirst(object, ["id", "objectId", "dbId", "expressId"]) ||
+      pickFirst(object, ["name", "label", "title", "displayName", "Name"])
+    );
   }
 
   function extractObjectsFromResponse(response) {
@@ -534,35 +551,21 @@
   }
 
   function extractGuidsFromResponse(response) {
-    if (!response) {
-      return [];
-    }
-
-    if (Array.isArray(response)) {
-      return response
-        .map(function (item) {
-          if (typeof item === "string") {
-            return item;
-          }
-          return pickFirst(item, ["guid", "globalId", "ifcGuid", "GlobalId"]);
-        })
-        .filter(Boolean);
-    }
-
-    return extractGuidsFromResponse(
-      response.items || response.objects || response.results || response.rows,
-    );
+    return extractObjectsFromResponse(response)
+      .map(function (item) {
+        if (typeof item === "string") {
+          return item;
+        }
+        return buildObjectIdentity(item);
+      })
+      .filter(Boolean);
   }
 
   function buildPageSignature(items) {
     return items
       .slice(0, 10)
       .map(function (item) {
-        return (
-          pickFirst(item, ["guid", "globalId", "ifcGuid", "GlobalId"]) ||
-          pickFirst(item, ["id", "objectId", "dbId", "expressId"]) ||
-          JSON.stringify(item).slice(0, 80)
-        );
+        return buildObjectIdentity(item) || JSON.stringify(item).slice(0, 80);
       })
       .join("|");
   }
@@ -581,6 +584,7 @@
     if (typeof fn !== "function") {
       return null;
     }
+
     var errors = [];
     for (var i = 0; i < argsList.length; i += 1) {
       try {
@@ -592,6 +596,7 @@
         errors.push(getErrorMessage(error));
       }
     }
+
     throw new Error(
       methodName + " feilet. Forsokte argumentvarianter: " + errors.join(" | "),
     );
@@ -605,8 +610,11 @@
       if (!item || typeof item !== "object") {
         return;
       }
+
       var propertySets = extractPropertySets(item);
+      var scope = inferObjectScope(item, propertySets);
       haveProperties = haveProperties || Object.keys(propertySets).length > 0;
+
       objects.push({
         id:
           pickFirst(item, ["id", "objectId", "dbId", "expressId"]) ||
@@ -626,6 +634,10 @@
             "category",
             "IfcClass",
           ]) || "Ukjent type",
+        modelName: scope.modelName,
+        layerName: scope.layerName,
+        scopeKey: scope.scopeKey,
+        scopeLabel: scope.scopeLabel,
         propertySets: propertySets,
         raw: item,
       });
@@ -642,11 +654,7 @@
     var containers = [
       { value: source.propertySets, fallbackSetName: "", allowFlatMap: false },
       { value: source.psets, fallbackSetName: "", allowFlatMap: false },
-      {
-        value: source.properties,
-        fallbackSetName: "__flat__",
-        allowFlatMap: true,
-      },
+      { value: source.properties, fallbackSetName: "__flat__", allowFlatMap: true },
       {
         value: source.propertySetData,
         fallbackSetName: "__flat__",
@@ -666,20 +674,16 @@
       }
     }
 
-    return normalizePropertyContainer(source, "", false);
+    return normalizePropertyContainer(source, "__flat__", true);
   }
 
-  function normalizePropertyContainer(
-    container,
-    fallbackSetName,
-    allowFlatMap,
-  ) {
+  function normalizePropertyContainer(container, fallbackSetName, allowFlatMap) {
     if (!container) {
       return {};
     }
 
     if (Array.isArray(container)) {
-      return normalizePropertyArray(container);
+      return normalizePropertyArray(container, fallbackSetName || "Default");
     }
 
     if (typeof container !== "object") {
@@ -688,30 +692,41 @@
 
     var propertySets = {};
     var flatValues = {};
+
     Object.keys(container).forEach(function (key) {
       var value = container[key];
-      if (Array.isArray(value)) {
-        var fromArray = normalizePropertyArray(value, key);
-        propertySets = mergePropertySets(propertySets, fromArray);
+
+      if (isLikelyMetadataKey(key) && allowFlatMap) {
         return;
       }
+
+      if (Array.isArray(value)) {
+        propertySets = mergePropertySets(
+          propertySets,
+          normalizePropertyArray(value, key),
+        );
+        return;
+      }
+
       if (value && typeof value === "object") {
         if (hasPropertyIdentity(value)) {
-          propertySets[key] = propertySets[key] || {};
-          propertySets[key][value.name || value.baseName || key] =
-            stringifyValue(
-              firstDefined([
-                value.value,
-                value.nominalValue,
-                value.displayValue,
-                value.Value,
-              ]),
-            );
+          var setName = fallbackSetName || "Default";
+          propertySets[setName] = propertySets[setName] || {};
+          propertySets[setName][value.name || value.baseName || key] = stringifyValue(
+            firstDefined([
+              value.value,
+              value.nominalValue,
+              value.displayValue,
+              value.Value,
+            ]),
+          );
           return;
         }
+
         propertySets[key] = flattenPropertyMap(value);
         return;
       }
+
       if (allowFlatMap) {
         flatValues[key] = stringifyValue(value);
       }
@@ -730,10 +745,12 @@
 
   function normalizePropertyArray(items, fallbackSetName) {
     var propertySets = {};
+
     items.forEach(function (item) {
       if (!item || typeof item !== "object") {
         return;
       }
+
       if (item.properties || item.values || item.entries) {
         var setName =
           item.name ||
@@ -746,6 +763,7 @@
         );
         return;
       }
+
       if (hasPropertyIdentity(item)) {
         var propertySetName =
           item.propertySet ||
@@ -765,6 +783,7 @@
           );
       }
     });
+
     return propertySets;
   }
 
@@ -772,7 +791,9 @@
     if (!map || typeof map !== "object") {
       return {};
     }
+
     var flat = {};
+
     Object.keys(map).forEach(function (key) {
       var value = map[key];
       if (value && typeof value === "object" && hasPropertyIdentity(value)) {
@@ -786,12 +807,15 @@
         );
         return;
       }
+
       if (value && typeof value === "object" && "value" in value) {
         flat[key] = stringifyValue(value.value);
         return;
       }
+
       flat[key] = stringifyValue(value);
     });
+
     return flat;
   }
 
@@ -813,13 +837,11 @@
   function mergePropertySets(left, right) {
     var result = {};
     var allKeys = Object.keys(left || {}).concat(Object.keys(right || {}));
+
     allKeys.forEach(function (key) {
-      result[key] = Object.assign(
-        {},
-        (left || {})[key] || {},
-        (right || {})[key] || {},
-      );
+      result[key] = Object.assign({}, (left || {})[key] || {}, (right || {})[key] || {});
     });
+
     return result;
   }
 
@@ -851,39 +873,38 @@
     if (!parent) {
       return [];
     }
-    return childElementsByLocalName(parent, "property").map(
-      function (propertyEl) {
-        return {
-          propertySet: textFromNested(propertyEl, [
-            "propertySet",
-            "simpleValue",
-          ]),
-          baseName: textFromNested(propertyEl, ["baseName", "simpleValue"]),
-          cardinality: propertyEl.getAttribute("cardinality") || "required",
-          valueRule: parseIdsValueRule(childByLocalName(propertyEl, "value")),
-        };
-      },
-    );
+
+    return childElementsByLocalName(parent, "property").map(function (propertyEl) {
+      return {
+        propertySet: textFromNested(propertyEl, ["propertySet", "simpleValue"]),
+        baseName: textFromNested(propertyEl, ["baseName", "simpleValue"]),
+        cardinality: propertyEl.getAttribute("cardinality") || "required",
+        valueRule: parseIdsValueRule(childByLocalName(propertyEl, "value")),
+      };
+    });
   }
 
   function parseIdsValueRule(valueEl) {
     if (!valueEl) {
       return { type: "any" };
     }
+
     var simple = textFromNested(valueEl, ["simpleValue"]);
     if (simple !== "") {
       return { type: "equals", value: simple };
     }
+
     var restriction = childByLocalName(valueEl, "restriction");
     if (!restriction) {
-      var nestedRestriction = valueEl.getElementsByTagNameNS(
+      var xsRestriction = valueEl.getElementsByTagNameNS(
         "http://www.w3.org/2001/XMLSchema",
         "restriction",
       )[0];
-      if (nestedRestriction) {
-        restriction = nestedRestriction;
+      if (xsRestriction) {
+        restriction = xsRestriction;
       }
     }
+
     if (restriction) {
       var patternNodes = restriction.getElementsByTagNameNS(
         "http://www.w3.org/2001/XMLSchema",
@@ -896,19 +917,78 @@
         };
       }
     }
+
     return { type: "any" };
   }
 
   function validateObjects(specs, objects) {
+    var scopesByKey = {};
+    var scopeOrder = [];
+    var groups = [];
+    var passedChecks = 0;
+    var failedChecks = 0;
+    var applicableObjectCount = 0;
+
+    objects.forEach(function (object) {
+      var scopeKey = object.scopeKey || "__default__";
+      if (!scopesByKey[scopeKey]) {
+        scopesByKey[scopeKey] = {
+          scopeKey: scopeKey,
+          scopeLabel: object.scopeLabel || "Uspesifisert modellag",
+          modelName: object.modelName || "",
+          layerName: object.layerName || "",
+          objects: [],
+        };
+        scopeOrder.push(scopeKey);
+      }
+      scopesByKey[scopeKey].objects.push(object);
+    });
+
+    var scopes = scopeOrder
+      .map(function (scopeKey) {
+        return validateScope(specs, scopesByKey[scopeKey]);
+      })
+      .sort(function (a, b) {
+        return b.summary.failedChecks - a.summary.failedChecks;
+      });
+
+    scopes.forEach(function (scope) {
+      passedChecks += scope.summary.passedChecks;
+      failedChecks += scope.summary.failedChecks;
+      applicableObjectCount += scope.summary.applicableObjectCount;
+      scope.groups.forEach(function (group) {
+        group.globalIndex = groups.length;
+        groups.push(group);
+      });
+    });
+
+    return {
+      groups: groups,
+      scopes: scopes,
+      summary: {
+        objectCount: objects.length,
+        scopeCount: scopes.length,
+        specCount: specs.length,
+        passedChecks: passedChecks,
+        failedChecks: failedChecks,
+        applicableObjectCount: applicableObjectCount,
+      },
+    };
+  }
+
+  function validateScope(specs, scope) {
     var groupsByKey = {};
+    var applicableObjects = {};
     var passedChecks = 0;
     var failedChecks = 0;
 
-    objects.forEach(function (object) {
+    scope.objects.forEach(function (object) {
       specs.forEach(function (spec) {
         if (!matchesAllRules(object, spec.applicability)) {
           return;
         }
+
+        applicableObjects[object.guid || object.id || object.name] = true;
 
         spec.requirements.forEach(function (rule) {
           var actual = getPropertyValue(
@@ -924,6 +1004,7 @@
 
           failedChecks += 1;
           var key = [
+            scope.scopeKey,
             spec.name,
             rule.propertySet,
             rule.baseName,
@@ -933,6 +1014,10 @@
           if (!groupsByKey[key]) {
             groupsByKey[key] = {
               key: key,
+              scopeKey: scope.scopeKey,
+              scopeLabel: scope.scopeLabel,
+              modelName: scope.modelName,
+              layerName: scope.layerName,
               specName: spec.name,
               propertySet: rule.propertySet,
               propertyName: rule.baseName,
@@ -948,6 +1033,9 @@
             guid: object.guid,
             name: object.name,
             type: object.type,
+            modelName: object.modelName,
+            layerName: object.layerName,
+            scopeLabel: object.scopeLabel,
             actualValue: actual,
             expectedValue: describeRule(rule.valueRule),
           });
@@ -955,19 +1043,21 @@
       });
     });
 
-    var groups = Object.keys(groupsByKey)
-      .map(function (key) {
-        return groupsByKey[key];
-      })
-      .sort(function (a, b) {
-        return b.objects.length - a.objects.length;
-      });
-
     return {
-      groups: groups,
+      scopeKey: scope.scopeKey,
+      scopeLabel: scope.scopeLabel,
+      modelName: scope.modelName,
+      layerName: scope.layerName,
+      objectCount: scope.objects.length,
+      groups: Object.keys(groupsByKey)
+        .map(function (key) {
+          return groupsByKey[key];
+        })
+        .sort(function (a, b) {
+          return b.objects.length - a.objects.length;
+        }),
       summary: {
-        objectCount: objects.length,
-        specCount: specs.length,
+        applicableObjectCount: Object.keys(applicableObjects).length,
         passedChecks: passedChecks,
         failedChecks: failedChecks,
       },
@@ -1027,13 +1117,19 @@
     if (!valueRule || valueRule.type === "any") {
       return true;
     }
+
     var actual =
       actualValue === null || actualValue === undefined
         ? ""
         : String(actualValue);
+
     if (valueRule.type === "equals") {
-      return actual.trim() === valueRule.value.trim();
+      return (
+        normalizeComparisonText(actual) ===
+        normalizeComparisonText(valueRule.value)
+      );
     }
+
     if (valueRule.type === "pattern") {
       try {
         return new RegExp(valueRule.value).test(actual);
@@ -1041,6 +1137,7 @@
         return false;
       }
     }
+
     return true;
   }
 
@@ -1049,24 +1146,41 @@
       return null;
     }
 
+    var exactSet = object.propertySets[propertySet];
     if (
-      object.propertySets[propertySet] &&
+      exactSet &&
+      Object.prototype.hasOwnProperty.call(exactSet, propertyName)
+    ) {
+      return exactSet[propertyName];
+    }
+
+    var normalizedSetName = findNormalizedKey(object.propertySets, propertySet);
+    if (
+      normalizedSetName &&
       Object.prototype.hasOwnProperty.call(
-        object.propertySets[propertySet],
+        object.propertySets[normalizedSetName],
         propertyName,
       )
     ) {
-      return object.propertySets[propertySet][propertyName];
+      return object.propertySets[normalizedSetName][propertyName];
     }
 
-    var flatKeys = [
-      propertyName,
-      propertySet + "." + propertyName,
-      propertySet + ":" + propertyName,
-      propertySet + "/" + propertyName,
-      propertySet + ">" + propertyName,
-    ];
+    var directMatch = findValueByNormalizedKey(exactSet || {}, propertyName);
+    if (directMatch !== null) {
+      return directMatch;
+    }
 
+    if (normalizedSetName) {
+      var normalizedMatch = findValueByNormalizedKey(
+        object.propertySets[normalizedSetName],
+        propertyName,
+      );
+      if (normalizedMatch !== null) {
+        return normalizedMatch;
+      }
+    }
+
+    var flatKeys = buildSearchKeys(propertySet, propertyName);
     for (var i = 0; i < flatKeys.length; i += 1) {
       if (
         object.propertySets.__flat__ &&
@@ -1079,6 +1193,14 @@
       }
     }
 
+    var normalizedFlatValue = findAnyFlatPropertyValue(
+      object.propertySets.__flat__,
+      flatKeys,
+    );
+    if (normalizedFlatValue !== null) {
+      return normalizedFlatValue;
+    }
+
     var setNames = Object.keys(object.propertySets);
     for (var j = 0; j < setNames.length; j += 1) {
       if (
@@ -1088,6 +1210,14 @@
         )
       ) {
         return object.propertySets[setNames[j]][propertyName];
+      }
+
+      var scopedValue = findValueByNormalizedKey(
+        object.propertySets[setNames[j]],
+        propertyName,
+      );
+      if (scopedValue !== null) {
+        return scopedValue;
       }
     }
 
@@ -1257,6 +1387,7 @@
     if (!state.validation || !state.validation.groups[groupIndex]) {
       return;
     }
+
     var group = state.validation.groups[groupIndex];
     try {
       await createBcfIssue(group);
@@ -1281,6 +1412,7 @@
       setRunStatus("Ingen feilgrupper a opprette BCF fra.", "state-warn");
       return;
     }
+
     var created = 0;
     for (var i = 0; i < state.validation.groups.length; i += 1) {
       try {
@@ -1297,6 +1429,7 @@
         return;
       }
     }
+
     setRunStatus("BCF opprettet for " + created + " grupper.", "state-ok");
   }
 
@@ -1425,7 +1558,7 @@
 
   function pickFirst(source, keys) {
     for (var i = 0; i < keys.length; i += 1) {
-      if (source[keys[i]]) {
+      if (source && source[keys[i]]) {
         return source[keys[i]];
       }
     }
@@ -1439,6 +1572,19 @@
       }
     }
     return undefined;
+  }
+
+  function firstNonEmpty(values) {
+    for (var i = 0; i < values.length; i += 1) {
+      if (
+        values[i] !== null &&
+        typeof values[i] !== "undefined" &&
+        String(values[i]).trim() !== ""
+      ) {
+        return values[i];
+      }
+    }
+    return "";
   }
 
   function stringifyValue(value) {
@@ -1481,6 +1627,193 @@
     return textarea.value;
   }
 
+  function inferObjectScope(item, propertySets) {
+    var modelName =
+      firstNonEmpty([
+        pickFirst(item, [
+          "modelName",
+          "model",
+          "sourceModel",
+          "documentName",
+          "document",
+          "fileName",
+          "file",
+          "sourceFile",
+          "ModelName",
+          "Model",
+          "FileName",
+        ]),
+        findPropertyAcrossSets(propertySets, [
+          "Model",
+          "ModelName",
+          "Model Name",
+          "File",
+          "FileName",
+          "File Name",
+          "Source File",
+          "Document",
+        ]),
+      ]) || "";
+
+    var layerName =
+      firstNonEmpty([
+        pickFirst(item, [
+          "layerName",
+          "layer",
+          "modelLayer",
+          "sourceLayer",
+          "discipline",
+          "containerName",
+          "LayerName",
+          "Layer",
+        ]),
+        findPropertyAcrossSets(propertySets, [
+          "Layer",
+          "LayerName",
+          "Layer Name",
+          "Model Layer",
+          "Discipline",
+          "Container",
+        ]),
+      ]) || "";
+
+    var labelParts = [];
+    if (modelName) {
+      labelParts.push(modelName);
+    }
+    if (
+      layerName &&
+      normalizeComparisonText(layerName) !== normalizeComparisonText(modelName)
+    ) {
+      labelParts.push(layerName);
+    }
+
+    return {
+      modelName: modelName,
+      layerName: layerName,
+      scopeKey: labelParts.length
+        ? labelParts.map(normalizeComparisonText).join("::")
+        : "__default__",
+      scopeLabel: labelParts.length ? labelParts.join(" / ") : "Uspesifisert modellag",
+    };
+  }
+
+  function findPropertyAcrossSets(propertySets, candidateNames) {
+    if (!propertySets) {
+      return "";
+    }
+
+    var setNames = Object.keys(propertySets);
+    for (var i = 0; i < setNames.length; i += 1) {
+      for (var j = 0; j < candidateNames.length; j += 1) {
+        var match = findValueByNormalizedKey(
+          propertySets[setNames[i]],
+          candidateNames[j],
+        );
+        if (match !== null && String(match).trim() !== "") {
+          return match;
+        }
+      }
+    }
+
+    return "";
+  }
+
+  function findNormalizedKey(map, expectedKey) {
+    if (!map || !expectedKey) {
+      return "";
+    }
+
+    var normalizedExpected = normalizeComparisonText(expectedKey);
+    var keys = Object.keys(map);
+    for (var i = 0; i < keys.length; i += 1) {
+      if (normalizeComparisonText(keys[i]) === normalizedExpected) {
+        return keys[i];
+      }
+    }
+    return "";
+  }
+
+  function findValueByNormalizedKey(map, expectedKey) {
+    if (!map || !expectedKey) {
+      return null;
+    }
+
+    var normalizedExpected = normalizeComparisonText(expectedKey);
+    var keys = Object.keys(map);
+    for (var i = 0; i < keys.length; i += 1) {
+      if (normalizeComparisonText(keys[i]) === normalizedExpected) {
+        return map[keys[i]];
+      }
+    }
+    return null;
+  }
+
+  function findAnyFlatPropertyValue(flatMap, candidateKeys) {
+    if (!flatMap) {
+      return null;
+    }
+
+    var keys = Object.keys(flatMap);
+    for (var i = 0; i < keys.length; i += 1) {
+      for (var j = 0; j < candidateKeys.length; j += 1) {
+        if (
+          normalizeComparisonText(keys[i]) ===
+          normalizeComparisonText(candidateKeys[j])
+        ) {
+          return flatMap[keys[i]];
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function normalizeComparisonText(value) {
+    var stringValue = stringifyValue(value);
+    if (!stringValue) {
+      return "";
+    }
+
+    var normalized = stringValue
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (typeof normalized.normalize === "function") {
+      normalized = normalized.normalize("NFKC");
+    }
+    return normalized.toLowerCase();
+  }
+
+  function sanitizeLabel(value) {
+    return (
+      String(value || "")
+        .replace(/\s+/g, "-")
+        .replace(/[^A-Za-z0-9_-]/g, "")
+        .slice(0, 48) || "scope"
+    );
+  }
+
+  function isLikelyMetadataKey(key) {
+    return [
+      "id",
+      "guid",
+      "globalid",
+      "ifcguid",
+      "name",
+      "title",
+      "label",
+      "type",
+      "ifcclass",
+      "model",
+      "modelname",
+      "layer",
+      "layername",
+      "filename",
+      "documentname",
+    ].indexOf(normalizeComparisonText(key)) !== -1;
+  }
+
   function getErrorMessage(error) {
     if (!error) {
       return "Ukjent feil.";
@@ -1500,5 +1833,3 @@
       .replace(/'/g, "&#39;");
   }
 })();
-
-
