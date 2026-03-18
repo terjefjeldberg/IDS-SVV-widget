@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-17-searchapi-2";
+  var BUILD_ID = "2026-03-18-searchapi-3";
 
   var state = {
     streamBim: {
@@ -216,6 +216,7 @@
 
     var diagnostics = [];
     var targeted = { objects: [], diagnostic: "" };
+    var fallback = { objects: [], diagnostic: "" };
 
     if (
       typeof api.getObjectInfoForSearch === "function" &&
@@ -241,6 +242,14 @@
       if (targeted.diagnostic) {
         diagnostics.push(targeted.diagnostic);
       }
+
+      fallback = await fetchViaFindObjects(api);
+      if (fallback.objects.length) {
+        return fallback;
+      }
+      if (fallback.diagnostic) {
+        diagnostics.push(fallback.diagnostic);
+      }
     }
 
     var genericObjectMethods = [
@@ -261,7 +270,7 @@
     return {
       objects: [],
       diagnostic:
-        diagnostics.filter(Boolean).slice(0, 3).join(" | ") ||
+        diagnostics.filter(Boolean).slice(0, 4).join(" | ") ||
         "Build " + BUILD_ID + ": Widgeten fant ingen IDS-treff via StreamBIM-sok, og denne prosjektkonfigurasjonen tilbyr ingen fullmodell-metode for widgeter.",
     };
   }
@@ -326,6 +335,104 @@
     return {
       objects: normalizeObjects(objects).objects,
       diagnostic: diagnostics.slice(0, 3).join(" | "),
+    };
+  }
+
+  async function fetchViaFindObjects(api) {
+    var pageSize = 200;
+    var skip = 0;
+    var pageIndex = 0;
+    var allItems = [];
+    var lastSignature = "";
+    var errors = [];
+
+    while (pageIndex < 100) {
+      try {
+        var response = await invokeMethodGuessing(api, "findObjects", [
+          {
+            key: "Name",
+            value: "",
+            limit: pageSize,
+            skip: skip,
+          },
+          {
+            key: "ID",
+            value: "",
+            limit: pageSize,
+            skip: skip,
+          },
+          {
+            filter: { key: "Name", value: "" },
+            page: { limit: pageSize, skip: skip },
+            sort: { field: "Name", descending: false },
+          },
+          {
+            filter: { key: "ID", value: "" },
+            page: { limit: pageSize, skip: skip },
+            sort: { field: "ID", descending: false },
+          },
+          {
+            filter: { key: "Name", value: "" },
+            limit: pageSize,
+            skip: skip,
+          },
+          {
+            filter: { key: "ID", value: "" },
+            limit: pageSize,
+            skip: skip,
+          },
+        ]);
+        var pageItems = extractObjectsFromResponse(response);
+        if (!pageItems.length) {
+          break;
+        }
+
+        var signature = buildPageSignature(pageItems);
+        if (pageIndex > 0 && signature && signature === lastSignature) {
+          break;
+        }
+
+        allItems = allItems.concat(pageItems);
+        lastSignature = signature;
+        if (pageItems.length < pageSize) {
+          break;
+        }
+
+        skip += pageSize;
+        pageIndex += 1;
+      } catch (error) {
+        errors.push(getErrorMessage(error));
+        break;
+      }
+    }
+
+    if (!allItems.length) {
+      return {
+        objects: [],
+        diagnostic:
+          "Build " +
+          BUILD_ID +
+          ": Generell findObjects-fallback returnerte ingen objekter via tomt Name/ID-sok" +
+          (errors.length ? " (siste feil: " + errors[errors.length - 1] + ")" : "."),
+      };
+    }
+
+    var hydrated = await hydrateObjects(api, allItems);
+    var uniqueObjects = [];
+    var seen = {};
+
+    for (var i = 0; i < hydrated.length; i += 1) {
+      var identity = buildObjectIdentity(hydrated[i]) || JSON.stringify(hydrated[i]).slice(0, 120);
+      if (!identity || seen[identity]) {
+        continue;
+      }
+      seen[identity] = true;
+      uniqueObjects.push(hydrated[i]);
+    }
+
+    return {
+      objects: normalizeObjects(uniqueObjects).objects,
+      diagnostic: "",
     };
   }
 
