@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-applicability-5";
+  var BUILD_ID = "2026-03-18-applicability-6";
 
   var state = {
     streamBim: {
@@ -748,17 +748,49 @@
     var candidateKeys = buildSearchKeys(search.propertySet, search.propertyName);
 
     for (var i = 0; i < candidateKeys.length; i += 1) {
-      try {
-        var response = await invokeMethodGuessing(api, "findObjects", [
-          { key: candidateKeys[i], value: search.value, limit: 1000 },
-          { key: candidateKeys[i], value: search.value },
-          { filter: { key: candidateKeys[i], value: search.value }, limit: 1000 },
+      var key = candidateKeys[i];
+      var argumentVariants = [
+        { key: key, value: search.value, limit: 1000, skip: 0 },
+        { key: key, value: search.value, limit: 1000 },
+        { key: key, value: search.value },
+        {
+          filter: { key: key, value: search.value },
+          page: { limit: 1000, skip: 0 },
+          sort: { field: "ID", descending: false },
+        },
+        {
+          filter: { key: key, value: search.value },
+          page: { limit: 1000, skip: 0 },
+        },
+        { filter: { key: key, value: search.value }, limit: 1000, skip: 0 },
+        { filter: { key: key, value: search.value }, limit: 1000 },
+        { filter: { key: key, value: search.value } },
+      ];
+
+      if (search.isSeedSearch) {
+        argumentVariants = argumentVariants.concat([
+          { key: key, limit: 1000, skip: 0 },
+          { key: key, limit: 1000 },
+          { key: key },
+          {
+            filter: { key: key },
+            page: { limit: 1000, skip: 0 },
+            sort: { field: "ID", descending: false },
+          },
+          { filter: { key: key }, page: { limit: 1000, skip: 0 } },
+          { filter: { key: key }, limit: 1000, skip: 0 },
+          { filter: { key: key }, limit: 1000 },
+          { filter: { key: key } },
         ]);
+      }
+
+      try {
+        var response = await invokeMethodGuessing(api, "findObjects", argumentVariants);
         if (extractObjectsFromResponse(response).length) {
           return {
             response: response,
             diagnostic: "",
-            matchedKey: candidateKeys[i],
+            matchedKey: key,
           };
         }
       } catch (error) {}
@@ -781,15 +813,34 @@
 
 
   function buildSearchKeys(propertySet, propertyName) {
-    return uniqueStrings([
-      propertySet ? propertySet + "~" + propertyName : "",
-      propertySet ? propertySet + "." + propertyName : "",
-      propertySet ? propertySet + ":" + propertyName : "",
-      propertySet ? propertySet + "/" + propertyName : "",
-      propertySet ? propertySet + ">" + propertyName : "",
-      propertySet ? propertySet + " - " + propertyName : "",
-      propertyName,
+    var propertySetVariants = uniqueStrings([
+      propertySet,
+      stripSchemaSuffix(propertySet),
     ]).filter(Boolean);
+    var propertyNameVariants = uniqueStrings([
+      propertyName,
+      stripSchemaSuffix(propertyName),
+    ]).filter(Boolean);
+    var keys = [];
+
+    propertySetVariants.forEach(function (propertySetVariant) {
+      propertyNameVariants.forEach(function (propertyNameVariant) {
+        keys.push(propertySetVariant + "~" + propertyNameVariant);
+        keys.push(propertySetVariant + "." + propertyNameVariant);
+        keys.push(propertySetVariant + ":" + propertyNameVariant);
+        keys.push(propertySetVariant + "/" + propertyNameVariant);
+        keys.push(propertySetVariant + ">" + propertyNameVariant);
+        keys.push(propertySetVariant + " - " + propertyNameVariant);
+      });
+    });
+
+    return uniqueStrings(keys.concat(propertyNameVariants)).filter(Boolean);
+  }
+
+  function stripSchemaSuffix(value) {
+    return String(value || "")
+      .trim()
+      .replace(/_\d+$/g, "");
   }
 
 
