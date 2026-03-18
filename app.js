@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-applicability-4";
+  var BUILD_ID = "2026-03-18-applicability-5";
 
   var state = {
     streamBim: {
@@ -238,7 +238,6 @@
     var diagnostics = [];
     var targeted = { objects: [], diagnostic: "" };
     var fallback = { objects: [], diagnostic: "" };
-    var rawFallback = { objects: [], diagnostic: "" };
     var best = { objects: [], diagnostic: "" };
     var collectedObjects = [];
 
@@ -252,7 +251,7 @@
         if (collectedObjects.length > best.objects.length) {
           best = {
             objects: collectedObjects.slice(),
-            diagnostic: "",
+            diagnostic: fallback.diagnostic || "",
           };
         }
       } else if (fallback.diagnostic) {
@@ -272,7 +271,10 @@
         diagnostics.push(targeted.diagnostic);
       }
 
-      if (best.objects.length && targeted.objects.length) {
+      if (
+        best.objects.length &&
+        (targeted.objects.length || fallback.objects.length > 1)
+      ) {
         return best;
       }
     }
@@ -283,17 +285,17 @@
       typeof api.getBuildingId === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
-      rawFallback = await fetchViaRawIfcSearch(api, specs);
-      if (rawFallback.objects.length) {
-        collectedObjects = mergeUniqueObjects(collectedObjects, rawFallback.objects);
+      fallback = await fetchViaRawIfcSearch(api, specs);
+      if (fallback.objects.length) {
+        collectedObjects = mergeUniqueObjects(collectedObjects, fallback.objects);
         if (collectedObjects.length > best.objects.length) {
           best = {
             objects: collectedObjects.slice(),
-            diagnostic: rawFallback.diagnostic || "",
+            diagnostic: fallback.diagnostic || "",
           };
         }
-      } else if (rawFallback.diagnostic) {
-        diagnostics.push(rawFallback.diagnostic);
+      } else if (fallback.diagnostic) {
+        diagnostics.push(fallback.diagnostic);
       }
     }
 
@@ -1775,7 +1777,7 @@
     scope.objects.forEach(function (object) {
       specs.forEach(function (spec) {
         if (
-          !matchesAllRules(object, spec.applicability) &&
+          !matchesSpecApplicabilityLocally(object, spec) &&
           !matchesApplicabilityHint(object, spec)
         ) {
           return;
@@ -1864,6 +1866,75 @@
         rule,
       ).ok;
     });
+  }
+
+  function matchesSpecApplicabilityLocally(object, spec) {
+    if (matchesAllRules(object, spec.applicability)) {
+      return true;
+    }
+
+    return matchesWildcardApplicabilityViaRequirements(object, spec);
+  }
+
+  function matchesWildcardApplicabilityViaRequirements(object, spec) {
+    if (!object || !spec || !coerceArray(spec.applicability).length) {
+      return false;
+    }
+
+    return coerceArray(spec.applicability).every(function (rule) {
+      var actual = getPropertyValue(object, rule.propertySet, rule.baseName);
+      if (evaluateRule(actual, rule).ok) {
+        return true;
+      }
+
+      if (rule.baseName || !rule.propertySet) {
+        return false;
+      }
+
+      var fallbackActual = findWildcardApplicabilityValue(
+        object,
+        spec,
+        rule.propertySet,
+      );
+      return evaluateRule(fallbackActual, rule).ok;
+    });
+  }
+
+  function findWildcardApplicabilityValue(object, spec, propertySet) {
+    var candidateRules = coerceArray(spec.requirements).concat(
+      coerceArray(spec.applicability).filter(function (rule) {
+        return !!rule.baseName;
+      }),
+    );
+
+    for (var i = 0; i < candidateRules.length; i += 1) {
+      var candidateRule = candidateRules[i];
+      if (!candidateRule.baseName) {
+        continue;
+      }
+      if (
+        propertySet &&
+        candidateRule.propertySet &&
+        !keysLooselyMatch(candidateRule.propertySet, propertySet)
+      ) {
+        continue;
+      }
+
+      var actual = getPropertyValue(
+        object,
+        candidateRule.propertySet || propertySet,
+        candidateRule.baseName,
+      );
+      if (
+        actual !== null &&
+        typeof actual !== "undefined" &&
+        String(actual).trim() !== ""
+      ) {
+        return actual;
+      }
+    }
+
+    return null;
   }
 
   function matchesApplicabilityHint(object, spec) {
