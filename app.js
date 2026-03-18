@@ -3,13 +3,14 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-applicability-1";
+  var BUILD_ID = "2026-03-18-applicability-2";
 
   var state = {
     streamBim: {
       connected: false,
       api: null,
       methods: [],
+      rawIfcExportVariant: "",
     },
     idsText: "",
     idsName: "",
@@ -1046,21 +1047,36 @@
           contentType: "application/json",
           body: { rules: [[ruleVariants[i]]] },
         });
+        var directGuids = extractGuidsFromResponse(createResponse);
+        if (directGuids.length) {
+          return {
+            response: directGuids,
+            diagnostic: "",
+          };
+        }
+
         var searchId = extractSearchId(createResponse);
         if (!searchId) {
           continue;
         }
 
-        var exportUrls = buildRawIfcExportUrls(context.apiBase, searchId);
-        for (var j = 0; j < exportUrls.length; j += 1) {
+        var resultCount = extractSearchResultCount(createResponse);
+        if (resultCount === 0) {
+          continue;
+        }
+
+        var exportRequests = buildRawIfcExportRequests(context.apiBase, searchId);
+        for (var j = 0; j < exportRequests.length; j += 1) {
           try {
             var exportResponse = await makeApiJsonRequest(api, {
-              url: exportUrls[j],
+              url: exportRequests[j].url,
               method: "GET",
               accept: "application/json",
             });
+            var exportGuids = extractGuidsFromExportResponse(exportResponse);
 
-            if (extractGuidsFromExportResponse(exportResponse).length) {
+            if (exportGuids.length) {
+              state.streamBim.rawIfcExportVariant = exportRequests[j].key;
               return {
                 response: exportResponse,
                 diagnostic: "",
@@ -1068,6 +1084,13 @@
             }
           } catch (error) {
             errors.push(getErrorMessage(error));
+
+            if (
+              state.streamBim.rawIfcExportVariant === exportRequests[j].key &&
+              resultCount > 0
+            ) {
+              state.streamBim.rawIfcExportVariant = "";
+            }
           }
         }
       } catch (error) {
@@ -1141,31 +1164,97 @@
     });
   }
 
-  function buildRawIfcExportUrls(apiBase, searchId) {
+  function buildRawIfcExportRequests(apiBase, searchId) {
     var encodedSearchId = encodeURIComponent(searchId);
     var officialFieldNames = encodeURIComponent(
       base64Encode("GUID|Name|Long Name|Description"),
     );
     var basicFieldNames = encodeURIComponent(base64Encode("GUID|Name"));
+    var requests = [
+      {
+        key: "official-field-union",
+        url:
+          apiBase +
+          "/ifc-searches/export/json?searchId=" +
+          encodedSearchId +
+          "&fieldUnion=true&fieldNames=" +
+          officialFieldNames +
+          "&page[limit]=1000&page[skip]=0",
+      },
+      {
+        key: "basic-fields",
+        url:
+          apiBase +
+          "/ifc-searches/export/json?searchId=" +
+          encodedSearchId +
+          "&fieldNames=" +
+          basicFieldNames +
+          "&page[limit]=1000&page[skip]=0",
+      },
+      {
+        key: "plain-export",
+        url:
+          apiBase +
+          "/ifc-searches/export/json?searchId=" +
+          encodedSearchId +
+          "&page[limit]=1000&page[skip]=0",
+      },
+    ];
+    var preferredKey = state.streamBim.rawIfcExportVariant || "";
 
-    return uniqueStrings([
-      apiBase +
-        "/ifc-searches/export/json?searchId=" +
-        encodedSearchId +
-        "&fieldUnion=true&fieldNames=" +
-        officialFieldNames +
-        "&page[limit]=1000&page[skip]=0",
-      apiBase +
-        "/ifc-searches/export/json?searchId=" +
-        encodedSearchId +
-        "&fieldNames=" +
-        basicFieldNames +
-        "&page[limit]=1000&page[skip]=0",
-      apiBase +
-        "/ifc-searches/export/json?searchId=" +
-        encodedSearchId +
-        "&page[limit]=1000&page[skip]=0",
+    if (!preferredKey) {
+      return requests;
+    }
+
+    return requests.filter(function (request) {
+      return request.key === preferredKey;
+    });
+  }
+
+  function extractSearchResultCount(response) {
+    var rawCount = firstDefined([
+      response && response.resultCount,
+      response && response.totalCount,
+      response && response.count,
+      response && response.total,
+      response && response.matches,
+      response && response.data && response.data.resultCount,
+      response && response.data && response.data.totalCount,
+      response && response.data && response.data.count,
+      response && response.data && response.data.total,
+      response &&
+        response.data &&
+        response.data.attributes &&
+        response.data.attributes.resultCount,
+      response &&
+        response.data &&
+        response.data.attributes &&
+        response.data.attributes.totalCount,
+      response &&
+        response.data &&
+        response.data.attributes &&
+        response.data.attributes.count,
+      response &&
+        response.meta &&
+        response.meta.resultCount,
+      response &&
+        response.meta &&
+        response.meta.totalCount,
+      response &&
+        response.meta &&
+        response.meta.count,
     ]);
+
+    if (rawCount === null || typeof rawCount === "undefined" || rawCount === "") {
+      return -1;
+    }
+
+    var parsed = Number(rawCount);
+    if (!isFinite(parsed)) {
+      return -1;
+    }
+
+    return parsed;
   }
 
   async function makeApiJsonRequest(api, request) {
@@ -3022,4 +3111,3 @@
       .replace(/'/g, "&#39;");
   }
 })();
-
