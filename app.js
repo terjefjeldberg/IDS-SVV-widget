@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-searchapi-4";
+  var BUILD_ID = "2026-03-18-searchapi-5";
 
   var state = {
     streamBim: {
@@ -2188,7 +2188,11 @@
     var keys = Object.keys(map);
     for (var i = 0; i < keys.length; i += 1) {
       var value = map[keys[i]];
-      if (value !== null && typeof value !== "undefined" && String(value).trim() !== "") {
+      if (
+        value !== null &&
+        typeof value !== "undefined" &&
+        String(value).trim() !== ""
+      ) {
         return value;
       }
     }
@@ -2223,53 +2227,53 @@
       return [];
     }
 
-    var aliases = [normalized];
-    var separatorCollapsed = normalized.replace(/[._:/>-]+/g, " ").replace(/s+/g, " ").trim();
+    var aliases = [];
+
+    function pushAlias(alias) {
+      if (!alias) {
+        return;
+      }
+      aliases.push(alias);
+
+      var nordicFolded = foldNordicCharacters(alias);
+      if (nordicFolded && nordicFolded !== alias) {
+        aliases.push(nordicFolded);
+      }
+    }
+
+    pushAlias(normalized);
+
+    var separatorCollapsed = normalized
+      .replace(/[._:/>-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     if (separatorCollapsed) {
-      aliases.push(separatorCollapsed);
+      pushAlias(separatorCollapsed);
     }
 
     var condensed = separatorCollapsed.replace(/[^a-z0-9]+/g, "");
     if (condensed) {
-      aliases.push(condensed);
+      pushAlias(condensed);
     }
 
-    var strippedSuffix = normalized.replace(/[s._:/>-]*d+$/, "").trim();
+    var strippedSuffix = normalized.replace(/[\s._:/>-]*\d+$/, "").trim();
     if (strippedSuffix) {
-      aliases.push(strippedSuffix);
+      pushAlias(strippedSuffix);
     }
 
-    var strippedSuffixCollapsed = separatorCollapsed.replace(/[s._:/>-]*d+$/, "").trim();
+    var strippedSuffixCollapsed = separatorCollapsed
+      .replace(/[\s._:/>-]*\d+$/, "")
+      .trim();
     if (strippedSuffixCollapsed) {
-      aliases.push(strippedSuffixCollapsed);
-      aliases.push(strippedSuffixCollapsed.replace(/[^a-z0-9]+/g, ""));
+      pushAlias(strippedSuffixCollapsed);
+      pushAlias(strippedSuffixCollapsed.replace(/[^a-z0-9]+/g, ""));
     }
 
     return uniqueStrings(aliases.filter(Boolean));
   }
 
-  function findAnyFlatPropertyValue(flatMap, candidateKeys) {
-    if (!flatMap) {
-      return null;
-    }
-
-    var keys = Object.keys(flatMap);
-    for (var i = 0; i < keys.length; i += 1) {
-      for (var j = 0; j < candidateKeys.length; j += 1) {
-        if (
-          normalizeComparisonText(keys[i]) ===
-          normalizeComparisonText(candidateKeys[j])
-        ) {
-          return flatMap[keys[i]];
-        }
-      }
-    }
-
-    return null;
-  }
-
   function normalizeComparisonText(value) {
-    var stringValue = stringifyValue(value);
+    var stringValue = repairCommonMojibake(stringifyValue(value));
     if (!stringValue) {
       return "";
     }
@@ -2282,6 +2286,35 @@
       normalized = normalized.normalize("NFKC");
     }
     return normalized.toLowerCase();
+  }
+
+  function repairCommonMojibake(value) {
+    return String(value || "")
+      .replace(/\u00c3\u00a6/g, "\u00e6")
+      .replace(/\u00c3\u00b8/g, "\u00f8")
+      .replace(/\u00c3\u00a5/g, "\u00e5")
+      .replace(/\u00c3\u2020/g, "\u00c6")
+      .replace(/\u00c3\u02dc/g, "\u00d8")
+      .replace(/\u00c3\u2026/g, "\u00c5");
+  }
+
+  function foldNordicCharacters(value) {
+    var normalized = String(value || "");
+    if (typeof normalized.normalize === "function") {
+      normalized = normalized.normalize("NFKD");
+    }
+
+    return normalized
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\u00e6/g, "ae")
+      .replace(/\u00f8/g, "o")
+      .replace(/\u00e5/g, "a")
+      .replace(/\u00c6/g, "ae")
+      .replace(/\u00d8/g, "o")
+      .replace(/\u00c5/g, "a")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
   }
 
   function sanitizeLabel(value) {
