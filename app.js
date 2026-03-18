@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-searchapi-5";
+  var BUILD_ID = "2026-03-18-searchapi-6";
 
   var state = {
     streamBim: {
@@ -236,6 +236,14 @@
       if (targeted.diagnostic) {
         diagnostics.push(targeted.diagnostic);
       }
+
+      fallback = await fetchViaGenericObjectInfoSearch(api);
+      if (fallback.objects.length) {
+        return fallback;
+      }
+      if (fallback.diagnostic) {
+        diagnostics.push(fallback.diagnostic);
+      }
     }
 
     if (
@@ -277,7 +285,7 @@
     return {
       objects: [],
       diagnostic:
-        diagnostics.filter(Boolean).slice(0, 4).join(" | ") ||
+        diagnostics.filter(Boolean).slice(0, 5).join(" | ") ||
         "Build " + BUILD_ID + ": Widgeten fant ingen IDS-treff via StreamBIM-sok, og denne prosjektkonfigurasjonen tilbyr ingen fullmodell-metode for widgeter.",
     };
   }
@@ -439,6 +447,86 @@
 
     return {
       objects: normalizeObjects(uniqueObjects).objects,
+      diagnostic: "",
+    };
+  }
+
+  async function fetchViaGenericObjectInfoSearch(api) {
+    var pageSize = 200;
+    var skip = 0;
+    var pageIndex = 0;
+    var allObjects = [];
+    var lastSignature = "";
+    var errors = [];
+
+    while (pageIndex < 100) {
+      try {
+        var response = await invokeMethodGuessing(api, "getObjectInfoForSearch", [
+          {
+            page: { limit: pageSize, skip: skip },
+            sort: { field: "Name", descending: false },
+            fieldUnion: true,
+          },
+          {
+            filter: {},
+            page: { limit: pageSize, skip: skip },
+            sort: { field: "Name", descending: false },
+            fieldUnion: true,
+          },
+          {
+            filter: { key: "Name", value: "" },
+            page: { limit: pageSize, skip: skip },
+            sort: { field: "Name", descending: false },
+            fieldUnion: true,
+          },
+          {
+            filter: { key: "ID", value: "" },
+            page: { limit: pageSize, skip: skip },
+            sort: { field: "ID", descending: false },
+            fieldUnion: true,
+          },
+          {
+            page: { limit: pageSize, skip: skip },
+            fieldUnion: true,
+          },
+        ]);
+        var pageObjects = extractObjectsFromResponse(response);
+        if (!pageObjects.length) {
+          break;
+        }
+
+        var signature = buildPageSignature(pageObjects);
+        if (pageIndex > 0 && signature && signature === lastSignature) {
+          break;
+        }
+
+        allObjects = allObjects.concat(pageObjects);
+        lastSignature = signature;
+        if (pageObjects.length < pageSize) {
+          break;
+        }
+
+        skip += pageSize;
+        pageIndex += 1;
+      } catch (error) {
+        errors.push(getErrorMessage(error));
+        break;
+      }
+    }
+
+    if (!allObjects.length) {
+      return {
+        objects: [],
+        diagnostic:
+          "Build " +
+          BUILD_ID +
+          ": Generell getObjectInfoForSearch-fallback returnerte ingen objektdata" +
+          (errors.length ? " (siste feil: " + errors[errors.length - 1] + ")" : "."),
+      };
+    }
+
+    return {
+      objects: normalizeObjects(await hydrateObjects(api, allObjects)).objects,
       diagnostic: "",
     };
   }
