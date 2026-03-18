@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-applicability-2";
+  var BUILD_ID = "2026-03-18-applicability-3";
 
   var state = {
     streamBim: {
@@ -238,28 +238,9 @@
     var diagnostics = [];
     var targeted = { objects: [], diagnostic: "" };
     var fallback = { objects: [], diagnostic: "" };
+    var rawFallback = { objects: [], diagnostic: "" };
     var best = { objects: [], diagnostic: "" };
     var collectedObjects = [];
-
-    if (
-      typeof api.makeApiRequest === "function" &&
-      typeof api.getProjectId === "function" &&
-      typeof api.getBuildingId === "function" &&
-      typeof api.getObjectInfo === "function"
-    ) {
-      fallback = await fetchViaRawIfcSearch(api, specs);
-      if (fallback.objects.length) {
-        collectedObjects = mergeUniqueObjects(collectedObjects, fallback.objects);
-        if (collectedObjects.length > best.objects.length) {
-          best = {
-            objects: collectedObjects.slice(),
-            diagnostic: "",
-          };
-        }
-      } else if (fallback.diagnostic) {
-        diagnostics.push(fallback.diagnostic);
-      }
-    }
 
     if (
       typeof api.findObjects === "function" &&
@@ -278,17 +259,41 @@
         diagnostics.push(fallback.diagnostic);
       }
 
-      if (!best.objects.length) {
-        targeted = await fetchViaApplicabilitySearch(api, specs);
-        if (targeted.objects.length) {
-          collectedObjects = mergeUniqueObjects(collectedObjects, targeted.objects);
+      targeted = await fetchViaApplicabilitySearch(api, specs);
+      if (targeted.objects.length) {
+        collectedObjects = mergeUniqueObjects(collectedObjects, targeted.objects);
+        if (collectedObjects.length > best.objects.length || !best.objects.length) {
           best = {
             objects: collectedObjects.slice(),
-            diagnostic: "",
+            diagnostic: targeted.diagnostic || "",
           };
-        } else if (targeted.diagnostic) {
-          diagnostics.push(targeted.diagnostic);
         }
+      } else if (targeted.diagnostic) {
+        diagnostics.push(targeted.diagnostic);
+      }
+
+      if (best.objects.length && targeted.objects.length) {
+        return best;
+      }
+    }
+
+    if (
+      typeof api.makeApiRequest === "function" &&
+      typeof api.getProjectId === "function" &&
+      typeof api.getBuildingId === "function" &&
+      typeof api.getObjectInfo === "function"
+    ) {
+      rawFallback = await fetchViaRawIfcSearch(api, specs);
+      if (rawFallback.objects.length) {
+        collectedObjects = mergeUniqueObjects(collectedObjects, rawFallback.objects);
+        if (collectedObjects.length > best.objects.length) {
+          best = {
+            objects: collectedObjects.slice(),
+            diagnostic: rawFallback.diagnostic || "",
+          };
+        }
+      } else if (rawFallback.diagnostic) {
+        diagnostics.push(rawFallback.diagnostic);
       }
     }
 
@@ -3111,3 +3116,4 @@
       .replace(/'/g, "&#39;");
   }
 })();
+
