@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-searchapi-8";
+  var BUILD_ID = "2026-03-18-bcf-1";
 
   var state = {
     streamBim: {
@@ -31,6 +31,7 @@
     els.connectionStatus = byId("connection-status");
     els.connectionDetail = byId("connection-detail");
     els.apiMethodCount = byId("api-method-count");
+    els.apiHint = byId("api-hint");
     els.apiMethods = byId("api-methods");
     els.idsFile = byId("ids-file");
     els.idsFileName = byId("ids-file-name");
@@ -97,16 +98,28 @@
     var methods = state.streamBim.methods;
     els.apiMethodCount.textContent = methods.length + " metoder";
     if (!methods.length) {
+      if (els.apiHint) {
+        els.apiHint.textContent = "BCF-stotte kan ikke vurderes for tilkoblingen er etablert.";
+      }
       els.apiMethods.className = "method-list empty-state";
       els.apiMethods.textContent = "Ingen metoder oppdaget enna.";
+      updateBcfUi();
       return;
     }
+
+    if (els.apiHint) {
+      els.apiHint.textContent = supportsBcfCreation(state.streamBim.api)
+        ? "BCF-opprettelse er tilgjengelig i denne instansen."
+        : "BCF-opprettelse er ikke eksponert i denne widget-instansen.";
+    }
+
     els.apiMethods.className = "method-list";
     els.apiMethods.innerHTML = methods
       .map(function (methodName) {
         return '<div class="method-chip">' + escapeHtml(methodName) + "</div>";
       })
       .join("");
+    updateBcfUi();
   }
 
   function onIdsFileSelected(event) {
@@ -1907,10 +1920,17 @@
           createBcfForGroup(groupIndex);
         });
       });
+
+    updateBcfUi();
   }
 
   async function createBcfForGroup(groupIndex) {
     if (!state.validation || !state.validation.groups[groupIndex]) {
+      return;
+    }
+
+    if (!supportsBcfCreation(state.streamBim.api)) {
+      setRunStatus(getBcfUnavailableMessage(), "state-warn");
       return;
     }
 
@@ -1939,6 +1959,11 @@
       return;
     }
 
+    if (!supportsBcfCreation(state.streamBim.api)) {
+      setRunStatus(getBcfUnavailableMessage(), "state-warn");
+      return;
+    }
+
     var created = 0;
     for (var i = 0; i < state.validation.groups.length; i += 1) {
       try {
@@ -1961,19 +1986,10 @@
 
   async function createBcfIssue(group) {
     var api = state.streamBim.api;
-    var methodName = firstAvailableMethod(api, [
-      "createBcfIssue",
-      "createIssue",
-      "addIssue",
-      "createBcf",
-      "createTopic",
-    ]);
+    var methodName = getBcfMethodName(api);
 
     if (!methodName) {
-      throw new Error(
-        "Fant ingen API-metode for BCF-opprettelse. Tilgjengelige metoder: " +
-          state.streamBim.methods.join(", "),
-      );
+      throw new Error(getBcfUnavailableMessage());
     }
 
     var payload = {
@@ -2016,6 +2032,48 @@
       { issue: payload },
       { topic: payload },
     ]);
+  }
+
+  function getBcfMethodName(api) {
+    return firstAvailableMethod(api, [
+      "createBcfIssue",
+      "createIssue",
+      "addIssue",
+      "createBcf",
+      "createTopic",
+    ]);
+  }
+
+  function supportsBcfCreation(api) {
+    return !!getBcfMethodName(api);
+  }
+
+  function getBcfUnavailableMessage() {
+    var hasRawApi = state.streamBim.methods.indexOf("makeApiRequest") !== -1;
+    return hasRawApi
+      ? "Denne StreamBIM-instansen eksponerer ingen BCF-/issue-metode til widgeter. makeApiRequest(...) finnes, men widget-API-et dokumenterer ikke noe BCF-endepunkt."
+      : "Denne StreamBIM-instansen eksponerer ingen BCF-/issue-metode til widgeter.";
+  }
+
+  function updateBcfUi() {
+    var supported = supportsBcfCreation(state.streamBim.api);
+    var title = supported ? "Opprett BCF for alle grupper" : getBcfUnavailableMessage();
+
+    if (els.createAllBcfBtn) {
+      els.createAllBcfBtn.disabled = !supported;
+      els.createAllBcfBtn.title = title;
+    }
+
+    if (!els.groupsRoot) {
+      return;
+    }
+
+    Array.prototype.slice
+      .call(els.groupsRoot.querySelectorAll('[data-action="create-bcf"]'))
+      .forEach(function (button) {
+        button.disabled = !supported;
+        button.title = title;
+      });
   }
 
   function setRunStatus(message, className) {

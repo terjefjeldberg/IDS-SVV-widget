@@ -6,7 +6,7 @@ StreamBIM-widget for a:
 - hente objekter og property sets fra StreamBIM
 - validere modellobjekter mot IDS-regler
 - gruppere like avvik
-- opprette BCF-saker direkte fra avviksgruppene
+- opprette BCF-saker direkte fra avviksgruppene nar StreamBIM-instansen eksponerer dette
 
 ## Filer
 
@@ -22,7 +22,7 @@ Denne første versjonen bruker en tolerant adapter fordi eksakte metodename fra 
 
 - kobler til StreamBIM
 - lister opp alle parent-metoder den faktisk ser
-- prover kjente kandidatmetoder for objektlesing og BCF-opprettelse
+- prover kjente kandidatmetoder for objektlesing og BCF-opprettelse, og deaktiverer BCF-knappene hvis API-et ikke eksponerer noen issue-metode
 
 Hvis StreamBIM-instansen bruker andre metodenavn eller payload-formater, kan `app.js` justeres direkte mot de metodene widgeten viser i diagnostikkpanelet.
 
