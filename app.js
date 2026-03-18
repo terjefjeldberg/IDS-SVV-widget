@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-searchapi-6";
+  var BUILD_ID = "2026-03-18-searchapi-8";
 
   var state = {
     streamBim: {
@@ -379,7 +379,7 @@
           {
             filter: { key: "Name", value: "" },
             page: { limit: pageSize, skip: skip },
-            sort: { field: "Name", descending: false },
+            sort: { field: "ID", descending: false },
           },
           {
             filter: { key: "ID", value: "" },
@@ -464,19 +464,19 @@
         var response = await invokeMethodGuessing(api, "getObjectInfoForSearch", [
           {
             page: { limit: pageSize, skip: skip },
-            sort: { field: "Name", descending: false },
+            sort: { field: "ID", descending: false },
             fieldUnion: true,
           },
           {
             filter: {},
             page: { limit: pageSize, skip: skip },
-            sort: { field: "Name", descending: false },
+            sort: { field: "ID", descending: false },
             fieldUnion: true,
           },
           {
             filter: { key: "Name", value: "" },
             page: { limit: pageSize, skip: skip },
-            sort: { field: "Name", descending: false },
+            sort: { field: "ID", descending: false },
             fieldUnion: true,
           },
           {
@@ -634,13 +634,13 @@
       queries.push({
         filter: { key: fallbackKeys[i], value: search.value },
         page: { limit: 1000, skip: 0 },
-        sort: { field: "Name", descending: false },
+        sort: { field: "ID", descending: false },
       });
       queries.push({
         key: fallbackKeys[i],
         value: search.value,
         page: { limit: 1000, skip: 0 },
-        sort: { field: "Name", descending: false },
+        sort: { field: "ID", descending: false },
       });
       queries.push({
         filter: { key: fallbackKeys[i], value: search.value },
@@ -1138,6 +1138,7 @@
 
     Object.keys(container).forEach(function (key) {
       var value = container[key];
+      var compositeKey = splitCompositePropertyKey(key);
 
       if (isLikelyMetadataKey(key) && allowFlatMap) {
         return;
@@ -1166,12 +1167,37 @@
           return;
         }
 
+        if (compositeKey) {
+          var compositeValue = extractScalarPropertyValue(value);
+          if (compositeValue !== null) {
+            assignPropertyValue(
+              propertySets,
+              compositeKey.propertySet,
+              compositeKey.propertyName,
+              compositeValue,
+            );
+            if (allowFlatMap) {
+              flatValues[key] = compositeValue;
+            }
+            return;
+          }
+        }
+
         propertySets[key] = flattenPropertyMap(value);
         return;
       }
 
       if (allowFlatMap) {
-        flatValues[key] = stringifyValue(value);
+        var flatValue = stringifyValue(value);
+        flatValues[key] = flatValue;
+        if (compositeKey) {
+          assignPropertyValue(
+            propertySets,
+            compositeKey.propertySet,
+            compositeKey.propertyName,
+            flatValue,
+          );
+        }
       }
     });
 
@@ -1643,6 +1669,14 @@
         if (anyNormalizedValue !== null) {
           return anyNormalizedValue;
         }
+      }
+
+      var wildcardFlatValue = findAnyFlatPropertyValueForSet(
+        object.propertySets.__flat__,
+        propertySet,
+      );
+      if (wildcardFlatValue !== null) {
+        return wildcardFlatValue;
       }
     }
 
@@ -2268,6 +2302,22 @@
     return null;
   }
 
+  function findAnyFlatPropertyValueForSet(flatMap, propertySet) {
+    if (!flatMap || !propertySet) {
+      return null;
+    }
+
+    var keys = Object.keys(flatMap);
+    for (var i = 0; i < keys.length; i += 1) {
+      var split = splitCompositePropertyKey(keys[i]);
+      if (split && keysLooselyMatch(split.propertySet, propertySet)) {
+        return flatMap[keys[i]];
+      }
+    }
+
+    return null;
+  }
+
   function findAnyPropertyValue(map) {
     if (!map || typeof map !== "object") {
       return null;
@@ -2358,6 +2408,60 @@
     }
 
     return uniqueStrings(aliases.filter(Boolean));
+  }
+
+  function splitCompositePropertyKey(key) {
+    var text = stringifyValue(key).trim();
+    if (!text) {
+      return null;
+    }
+
+    var separators = [" - ", "~", ".", ":", "/", ">"];
+    for (var i = 0; i < separators.length; i += 1) {
+      var separator = separators[i];
+      var index = text.indexOf(separator);
+      if (index <= 0) {
+        continue;
+      }
+
+      var propertySet = text.slice(0, index).trim();
+      var propertyName = text.slice(index + separator.length).trim();
+      if (propertySet && propertyName) {
+        return {
+          propertySet: propertySet,
+          propertyName: propertyName,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function extractScalarPropertyValue(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return null;
+    }
+
+    var scalar = firstDefined([
+      value.value,
+      value.nominalValue,
+      value.displayValue,
+      value.Value,
+    ]);
+    if (typeof scalar === "undefined") {
+      return null;
+    }
+
+    return stringifyValue(scalar);
+  }
+
+  function assignPropertyValue(propertySets, propertySet, propertyName, value) {
+    if (!propertySet || !propertyName) {
+      return;
+    }
+
+    propertySets[propertySet] = propertySets[propertySet] || {};
+    propertySets[propertySet][propertyName] = stringifyValue(value);
   }
 
   function normalizeComparisonText(value) {
