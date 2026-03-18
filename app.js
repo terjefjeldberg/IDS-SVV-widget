@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-searchapi-3";
+  var BUILD_ID = "2026-03-18-searchapi-4";
 
   var state = {
     streamBim: {
@@ -180,12 +180,19 @@
       renderGroups(report);
 
       if (!report.summary.applicableObjectCount) {
-        var noMatchMessage = "Validering ferdig, men ingen objekter matchet IDS applicability.";
+        var noMatchMessage =
+          "Validering ferdig, men ingen objekter matchet IDS applicability lokalt.";
+        if (modelData.objects && modelData.objects.length) {
+          noMatchMessage +=
+            " Widgeten leste " +
+            modelData.objects.length +
+            " modellobjekter, men ingen av dem passerte applicability-reglene.";
+        }
         if (modelData.diagnostic) {
           noMatchMessage += " " + modelData.diagnostic;
         } else {
           noMatchMessage +=
-            " Dette tyder pa at property-navnene fra StreamBIM fortsatt ikke treffer IDS-en.";
+            " Dette tyder pa at property-navn eller property-verdier fra StreamBIM fortsatt ikke treffer IDS-en.";
         }
         setRunStatus(noMatchMessage, "state-warn");
       } else {
@@ -1518,6 +1525,7 @@
     var exactSet = object.propertySets[propertySet];
     if (
       exactSet &&
+      propertyName &&
       Object.prototype.hasOwnProperty.call(exactSet, propertyName)
     ) {
       return exactSet[propertyName];
@@ -1526,12 +1534,28 @@
     var normalizedSetName = findNormalizedKey(object.propertySets, propertySet);
     if (
       normalizedSetName &&
+      propertyName &&
       Object.prototype.hasOwnProperty.call(
         object.propertySets[normalizedSetName],
         propertyName,
       )
     ) {
       return object.propertySets[normalizedSetName][propertyName];
+    }
+
+    if (!propertyName) {
+      var anyValue = findAnyPropertyValue(exactSet || {});
+      if (anyValue !== null) {
+        return anyValue;
+      }
+      if (normalizedSetName) {
+        var anyNormalizedValue = findAnyPropertyValue(
+          object.propertySets[normalizedSetName],
+        );
+        if (anyNormalizedValue !== null) {
+          return anyNormalizedValue;
+        }
+      }
     }
 
     var directMatch = findValueByNormalizedKey(exactSet || {}, propertyName);
@@ -1573,6 +1597,7 @@
     var setNames = Object.keys(object.propertySets);
     for (var j = 0; j < setNames.length; j += 1) {
       if (
+        propertyName &&
         Object.prototype.hasOwnProperty.call(
           object.propertySets[setNames[j]],
           propertyName,
@@ -1587,6 +1612,13 @@
       );
       if (scopedValue !== null) {
         return scopedValue;
+      }
+
+      if (!propertyName && keysLooselyMatch(setNames[j], propertySet)) {
+        var wildcardScopedValue = findAnyPropertyValue(object.propertySets[setNames[j]]);
+        if (wildcardScopedValue !== null) {
+          return wildcardScopedValue;
+        }
       }
     }
 
@@ -2108,10 +2140,9 @@
       return "";
     }
 
-    var normalizedExpected = normalizeComparisonText(expectedKey);
     var keys = Object.keys(map);
     for (var i = 0; i < keys.length; i += 1) {
-      if (normalizeComparisonText(keys[i]) === normalizedExpected) {
+      if (keysLooselyMatch(keys[i], expectedKey)) {
         return keys[i];
       }
     }
@@ -2123,14 +2154,98 @@
       return null;
     }
 
-    var normalizedExpected = normalizeComparisonText(expectedKey);
     var keys = Object.keys(map);
     for (var i = 0; i < keys.length; i += 1) {
-      if (normalizeComparisonText(keys[i]) === normalizedExpected) {
+      if (keysLooselyMatch(keys[i], expectedKey)) {
         return map[keys[i]];
       }
     }
     return null;
+  }
+
+  function findAnyFlatPropertyValue(flatMap, candidateKeys) {
+    if (!flatMap) {
+      return null;
+    }
+
+    var keys = Object.keys(flatMap);
+    for (var i = 0; i < keys.length; i += 1) {
+      for (var j = 0; j < candidateKeys.length; j += 1) {
+        if (keysLooselyMatch(keys[i], candidateKeys[j])) {
+          return flatMap[keys[i]];
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function findAnyPropertyValue(map) {
+    if (!map || typeof map !== "object") {
+      return null;
+    }
+
+    var keys = Object.keys(map);
+    for (var i = 0; i < keys.length; i += 1) {
+      var value = map[keys[i]];
+      if (value !== null && typeof value !== "undefined" && String(value).trim() !== "") {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  function keysLooselyMatch(left, right) {
+    if (!left || !right) {
+      return false;
+    }
+
+    var leftAliases = buildComparisonAliases(left);
+    var rightAliases = buildComparisonAliases(right);
+    var seen = {};
+
+    for (var i = 0; i < leftAliases.length; i += 1) {
+      seen[leftAliases[i]] = true;
+    }
+    for (var j = 0; j < rightAliases.length; j += 1) {
+      if (seen[rightAliases[j]]) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function buildComparisonAliases(value) {
+    var normalized = normalizeComparisonText(value);
+    if (!normalized) {
+      return [];
+    }
+
+    var aliases = [normalized];
+    var separatorCollapsed = normalized.replace(/[._:/>-]+/g, " ").replace(/s+/g, " ").trim();
+    if (separatorCollapsed) {
+      aliases.push(separatorCollapsed);
+    }
+
+    var condensed = separatorCollapsed.replace(/[^a-z0-9]+/g, "");
+    if (condensed) {
+      aliases.push(condensed);
+    }
+
+    var strippedSuffix = normalized.replace(/[s._:/>-]*d+$/, "").trim();
+    if (strippedSuffix) {
+      aliases.push(strippedSuffix);
+    }
+
+    var strippedSuffixCollapsed = separatorCollapsed.replace(/[s._:/>-]*d+$/, "").trim();
+    if (strippedSuffixCollapsed) {
+      aliases.push(strippedSuffixCollapsed);
+      aliases.push(strippedSuffixCollapsed.replace(/[^a-z0-9]+/g, ""));
+    }
+
+    return uniqueStrings(aliases.filter(Boolean));
   }
 
   function findAnyFlatPropertyValue(flatMap, candidateKeys) {
