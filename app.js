@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-applicability-3";
+  var BUILD_ID = "2026-03-18-applicability-4";
 
   var state = {
     streamBim: {
