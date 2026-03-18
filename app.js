@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-bcf-3";
+  var BUILD_ID = "2026-03-18-applicability-1";
 
   var state = {
     streamBim: {
@@ -345,12 +345,12 @@
 
       for (var j = 0; j < candidates.length; j += 1) {
         var hydrated = await bestEffortGetObjectInfo(api, candidates[j]);
-        var identity = buildObjectIdentity(hydrated);
-        if (!identity || identities[identity]) {
-          continue;
-        }
-        identities[identity] = true;
-        objects.push(mergeObjectPayloads(candidates[j], hydrated));
+        storeApplicableObject(
+          identities,
+          objects,
+          mergeObjectPayloads(candidates[j], hydrated),
+          searches[i],
+        );
       }
     }
 
@@ -365,12 +365,12 @@
 
         for (var l = 0; l < seedCandidates.length; l += 1) {
           var seedHydrated = await bestEffortGetObjectInfo(api, seedCandidates[l]);
-          var seedIdentity = buildObjectIdentity(seedHydrated);
-          if (!seedIdentity || identities[seedIdentity]) {
-            continue;
-          }
-          identities[seedIdentity] = true;
-          objects.push(mergeObjectPayloads(seedCandidates[l], seedHydrated));
+          storeApplicableObject(
+            identities,
+            objects,
+            mergeObjectPayloads(seedCandidates[l], seedHydrated),
+            seedSearches[k],
+          );
         }
       }
     }
@@ -517,13 +517,15 @@
       }
 
       for (var j = 0; j < guids.length; j += 1) {
+        var guid = stringifyValue(guids[j]);
         var hydrated = await bestEffortGetObjectInfo(api, guids[j]);
-        var identity = buildObjectIdentity(hydrated) || stringifyValue(guids[j]);
-        if (!identity || identities[identity]) {
-          continue;
-        }
-        identities[identity] = true;
-        objects.push(mergeObjectPayloads({ guid: stringifyValue(guids[j]) }, hydrated));
+        storeApplicableObject(
+          identities,
+          objects,
+          mergeObjectPayloads({ guid: guid }, hydrated),
+          searches[i],
+          guid,
+        );
       }
     }
 
@@ -616,8 +618,38 @@
     return { objects: hydrated };
   }
 
+  function addApplicabilitySearch(searchMap, target, search) {
+    if (!search || !search.propertyName) {
+      return;
+    }
+
+    var key = [
+      search.propertySet || "",
+      search.propertyName || "",
+      typeof search.value === "undefined" ? "" : stringifyValue(search.value),
+      search.isSeedSearch ? "seed" : "exact",
+    ].join("::");
+
+    if (!searchMap[key]) {
+      searchMap[key] = {
+        propertySet: search.propertySet || "",
+        propertyName: search.propertyName || "",
+        value:
+          typeof search.value === "undefined" ? "" : stringifyValue(search.value),
+        isSeedSearch: !!search.isSeedSearch,
+        specNames: uniqueStrings(search.specNames || []),
+      };
+      target.push(searchMap[key]);
+      return;
+    }
+
+    searchMap[key].specNames = uniqueStrings(
+      coerceArray(searchMap[key].specNames).concat(coerceArray(search.specNames)),
+    );
+  }
+
   function buildApplicabilitySearches(specs) {
-    var seen = {};
+    var searchMap = {};
     var searches = [];
 
     specs.forEach(function (spec) {
@@ -627,16 +659,11 @@
             return;
           }
 
-          var key = [rule.propertySet || "", rule.baseName, searchValue].join("::");
-          if (seen[key]) {
-            return;
-          }
-
-          seen[key] = true;
-          searches.push({
+          addApplicabilitySearch(searchMap, searches, {
             propertySet: rule.propertySet || "",
             propertyName: rule.baseName,
             value: searchValue,
+            specNames: [spec.name],
           });
         });
       });
@@ -646,57 +673,48 @@
   }
 
   function buildApplicabilitySeedSearches(specs) {
-    var seen = {};
+    var searchMap = {};
     var searches = [];
     var fallbackSearches = [];
 
     specs.forEach(function (spec) {
+      var specHasConcreteApplicability = false;
+
       (spec.applicability || []).forEach(function (rule) {
         if (!rule.baseName) {
           return;
         }
 
-        var key = [rule.propertySet || "", rule.baseName].join("::");
-        if (seen[key]) {
-          return;
-        }
-
-        seen[key] = true;
-        searches.push({
+        specHasConcreteApplicability = true;
+        addApplicabilitySearch(searchMap, searches, {
           propertySet: rule.propertySet || "",
           propertyName: rule.baseName,
           value: "",
           isSeedSearch: true,
+          specNames: [spec.name],
         });
       });
-    });
 
-    if (searches.length) {
-      return searches;
-    }
+      if (specHasConcreteApplicability) {
+        return;
+      }
 
-    specs.forEach(function (spec) {
       (spec.requirements || []).forEach(function (rule) {
         if (!rule.baseName) {
           return;
         }
 
-        var key = [rule.propertySet || "", rule.baseName].join("::");
-        if (seen[key]) {
-          return;
-        }
-
-        seen[key] = true;
-        fallbackSearches.push({
+        addApplicabilitySearch(searchMap, fallbackSearches, {
           propertySet: rule.propertySet || "",
           propertyName: rule.baseName,
           value: "",
           isSeedSearch: true,
+          specNames: [spec.name],
         });
       });
     });
 
-    return fallbackSearches.slice(0, 8);
+    return searches.concat(fallbackSearches.slice(0, 8));
   }
 
   function buildSearchValues(valueRule) {
@@ -824,7 +842,73 @@
       }
     });
 
+    var applicableSpecs = uniqueStrings(
+      coerceArray(
+        baseObject && (baseObject._idsApplicableSpecs || baseObject.idsApplicableSpecs),
+      ).concat(
+        coerceArray(
+          detailObject &&
+            (detailObject._idsApplicableSpecs || detailObject.idsApplicableSpecs),
+        ),
+      ),
+    );
+
+    if (applicableSpecs.length) {
+      merged._idsApplicableSpecs = applicableSpecs;
+      merged.idsApplicableSpecs = applicableSpecs.slice();
+    }
+
     return merged;
+  }
+
+  function applyApplicabilityHints(object, search) {
+    if (!object || !search) {
+      return object;
+    }
+
+    var applicableSpecs = uniqueStrings(
+      coerceArray(object._idsApplicableSpecs || object.idsApplicableSpecs).concat(
+        coerceArray(search.specNames),
+      ),
+    );
+
+    if (!applicableSpecs.length) {
+      return object;
+    }
+
+    return Object.assign({}, object, {
+      _idsApplicableSpecs: applicableSpecs,
+      idsApplicableSpecs: applicableSpecs.slice(),
+    });
+  }
+
+  function storeApplicableObject(
+    identities,
+    objects,
+    object,
+    search,
+    fallbackIdentity,
+  ) {
+    if (!object) {
+      return;
+    }
+
+    var hintedObject = applyApplicabilityHints(object, search);
+    var identity = buildObjectIdentity(hintedObject) || stringifyValue(fallbackIdentity);
+    if (!identity) {
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(identities, identity)) {
+      objects[identities[identity]] = mergeObjectPayloads(
+        objects[identities[identity]],
+        hintedObject,
+      );
+      return;
+    }
+
+    identities[identity] = objects.length;
+    objects.push(hintedObject);
   }
 
   function buildObjectIdentity(object) {
@@ -1133,10 +1217,14 @@
       var identity =
         buildObjectIdentity(object) ||
         JSON.stringify(object && (object.raw || object)).slice(0, 120);
-      if (!identity || seen[identity]) {
+      if (!identity) {
         return;
       }
-      seen[identity] = true;
+      if (Object.prototype.hasOwnProperty.call(seen, identity)) {
+        merged[seen[identity]] = mergeObjectPayloads(merged[seen[identity]], object);
+        return;
+      }
+      seen[identity] = merged.length;
       merged.push(object);
     });
 
@@ -1203,6 +1291,9 @@
         scopeKey: scope.scopeKey,
         scopeLabel: scope.scopeLabel,
         propertySets: propertySets,
+        idsApplicableSpecs: uniqueStrings(
+          coerceArray(item._idsApplicableSpecs || item.idsApplicableSpecs || []),
+        ),
         raw: item,
       });
     });
@@ -1589,7 +1680,10 @@
 
     scope.objects.forEach(function (object) {
       specs.forEach(function (spec) {
-        if (!matchesAllRules(object, spec.applicability)) {
+        if (
+          !matchesAllRules(object, spec.applicability) &&
+          !matchesApplicabilityHint(object, spec)
+        ) {
           return;
         }
 
@@ -1676,6 +1770,18 @@
         rule,
       ).ok;
     });
+  }
+
+  function matchesApplicabilityHint(object, spec) {
+    if (!object || !spec) {
+      return false;
+    }
+
+    return coerceArray(object.idsApplicableSpecs || object._idsApplicableSpecs).some(
+      function (name) {
+        return normalizeComparisonText(name) === normalizeComparisonText(spec.name);
+      },
+    );
   }
 
   function evaluateRule(actualValue, rule) {
@@ -2916,3 +3022,4 @@
       .replace(/'/g, "&#39;");
   }
 })();
+
