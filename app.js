@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-bcf-2";
+  var BUILD_ID = "2026-03-18-bcf-3";
 
   var state = {
     streamBim: {
@@ -2213,13 +2213,106 @@
       },
     };
 
-    return makeApiJsonRequest(api, {
+    var topicResponse = await makeApiJsonRequest(api, {
       url: context.apiBase + "/v2/topics",
       method: "POST",
-      accept: "application/json",
-      contentType: "application/json",
+      accept: "application/vnd.api+json",
+      contentType: "application/vnd.api+json",
       body: requestBody,
     });
+
+    var topicId = extractTopicId(topicResponse);
+    if (topicId) {
+      try {
+        await createTopicViewpointViaRawApi(api, context, topicId);
+      } catch (error) {
+        console.warn("[IDS SVV] Topic opprettet, men viewpoint feilet:", getErrorMessage(error));
+      }
+    }
+
+    return topicResponse;
+  }
+
+  async function createTopicViewpointViaRawApi(api, context, topicId) {
+    var cameraState = await bestEffortGetCameraState(api);
+    if (!cameraState) {
+      return null;
+    }
+
+    return makeApiJsonRequest(api, {
+      url: context.apiBase + "/v2/topic-viewpoints",
+      method: "POST",
+      accept: "application/vnd.api+json",
+      contentType: "application/vnd.api+json",
+      body: {
+        data: {
+          attributes: {
+            "camera-state": cameraState,
+            "hidden-layers": [],
+            "selected-count": null,
+          },
+          relationships: {
+            object: {
+              data: null,
+            },
+            building: {
+              data: {
+                type: "buildings",
+                id: String(context.buildingId),
+              },
+            },
+            topic: {
+              data: {
+                type: "topics",
+                id: String(topicId),
+              },
+            },
+          },
+          type: "topic-viewpoints",
+        },
+      },
+    });
+  }
+
+  async function bestEffortGetCameraState(api) {
+    if (!api || typeof api.getCameraState !== "function") {
+      return null;
+    }
+
+    try {
+      var rawState = await api.getCameraState();
+      if (!rawState || typeof rawState !== "object") {
+        return null;
+      }
+
+      var cameraState = {};
+      [
+        "position",
+        "quaternion",
+        "showGrid",
+        "target",
+        "up",
+        "fov",
+        "distance",
+        "rotation",
+      ].forEach(function (key) {
+        if (typeof rawState[key] !== "undefined") {
+          cameraState[key] = rawState[key];
+        }
+      });
+
+      return Object.keys(cameraState).length ? cameraState : rawState;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function extractTopicId(response) {
+    return firstNonEmpty([
+      response && response.data && response.data.id,
+      response && response.id,
+      response && response.data && response.data.topic && response.data.topic.id,
+    ]);
   }
 
   function getBcfMethodName(api) {
