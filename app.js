@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-search-clean-3";
+  var BUILD_ID = "2026-03-18-search-clean-4";
 
   var state = {
     streamBim: {
@@ -238,14 +238,23 @@
     var targeted = { objects: [], diagnostic: "" };
     var fallback = { objects: [], diagnostic: "" };
     var best = { objects: [], diagnostic: "" };
+    var collectedObjects = [];
 
     if (
-      typeof api.getObjectInfoForSearch === "function" &&
+      typeof api.makeApiRequest === "function" &&
+      typeof api.getProjectId === "function" &&
+      typeof api.getBuildingId === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
-      fallback = await fetchViaGenericObjectInfoSearch(api);
-      if (fallback.objects.length > best.objects.length) {
-        best = fallback;
+      fallback = await fetchViaRawIfcSearch(api, specs);
+      if (fallback.objects.length) {
+        collectedObjects = mergeUniqueObjects(collectedObjects, fallback.objects);
+        if (collectedObjects.length > best.objects.length) {
+          best = {
+            objects: collectedObjects.slice(),
+            diagnostic: "",
+          };
+        }
       } else if (fallback.diagnostic) {
         diagnostics.push(fallback.diagnostic);
       }
@@ -256,8 +265,14 @@
       typeof api.getObjectInfo === "function"
     ) {
       fallback = await fetchViaFindObjects(api);
-      if (fallback.objects.length > best.objects.length) {
-        best = fallback;
+      if (fallback.objects.length) {
+        collectedObjects = mergeUniqueObjects(collectedObjects, fallback.objects);
+        if (collectedObjects.length > best.objects.length) {
+          best = {
+            objects: collectedObjects.slice(),
+            diagnostic: "",
+          };
+        }
       } else if (fallback.diagnostic) {
         diagnostics.push(fallback.diagnostic);
       }
@@ -265,7 +280,11 @@
       if (!best.objects.length) {
         targeted = await fetchViaApplicabilitySearch(api, specs);
         if (targeted.objects.length) {
-          best = targeted;
+          collectedObjects = mergeUniqueObjects(collectedObjects, targeted.objects);
+          best = {
+            objects: collectedObjects.slice(),
+            diagnostic: "",
+          };
         } else if (targeted.diagnostic) {
           diagnostics.push(targeted.diagnostic);
         }
@@ -460,71 +479,67 @@
     };
   }
 
-  async function fetchViaGenericObjectInfoSearch(api) {
-    var pageSize = 200;
-    var skip = 0;
-    var pageIndex = 0;
-    var allObjects = [];
-    var lastSignature = "";
-    var errors = [];
+  async function fetchViaRawIfcSearch(api, specs) {
+    var searches = buildApplicabilitySearches(specs).concat(
+      buildApplicabilitySeedSearches(specs),
+    );
+    var identities = {};
+    var objects = [];
+    var diagnostics = [];
+    var context = await createRawIfcApiContext(api);
 
-    while (pageIndex < 100) {
-      try {
-        var response = await invokeMethodGuessing(api, "getObjectInfoForSearch", [
-          {
-            page: { limit: pageSize, skip: skip },
-            fieldUnion: true,
-          },
-          {
-            filter: {},
-            page: { limit: pageSize, skip: skip },
-            fieldUnion: true,
-          },
-          {
-            page: { limit: pageSize, skip: skip },
-          },
-          {
-            filter: {},
-            page: { limit: pageSize, skip: skip },
-          },
-        ]);
-        var pageObjects = extractObjectsFromResponse(response);
-        if (!pageObjects.length) {
-          break;
-        }
-
-        var signature = buildPageSignature(pageObjects);
-        if (pageIndex > 0 && signature && signature === lastSignature) {
-          break;
-        }
-
-        allObjects = allObjects.concat(pageObjects);
-        lastSignature = signature;
-        if (pageObjects.length < pageSize) {
-          break;
-        }
-
-        skip += pageSize;
-        pageIndex += 1;
-      } catch (error) {
-        errors.push(getErrorMessage(error));
-        break;
-      }
-    }
-
-    if (!allObjects.length) {
+    if (!searches.length) {
       return {
         objects: [],
         diagnostic:
           "Build " +
           BUILD_ID +
-          ": Generell getObjectInfoForSearch-fallback returnerte ingen objektdata" +
-          (errors.length ? " (siste feil: " + errors[errors.length - 1] + ")" : "."),
+          ": IDS-applicability ga ingen konkrete property-sok for raa IFC API.",
+      };
+    }
+
+    if (!context.apiBase) {
+      return {
+        objects: [],
+        diagnostic:
+          "Build " +
+          BUILD_ID +
+          ": Klarte ikke etablere prosjektsti for raa IFC API-sok.",
+      };
+    }
+
+    for (var i = 0; i < searches.length; i += 1) {
+      var queryResult = await runRawIfcApiSearch(api, context, searches[i]);
+      var guids = extractGuidsFromExportResponse(queryResult.response);
+
+      if (!guids.length && queryResult.diagnostic) {
+        diagnostics.push(queryResult.diagnostic);
+      }
+
+      for (var j = 0; j < guids.length; j += 1) {
+        var hydrated = await bestEffortGetObjectInfo(api, guids[j]);
+        var identity = buildObjectIdentity(hydrated) || stringifyValue(guids[j]);
+        if (!identity || identities[identity]) {
+          continue;
+        }
+        identities[identity] = true;
+        objects.push(mergeObjectPayloads({ guid: stringifyValue(guids[j]) }, hydrated));
+      }
+    }
+
+    if (!objects.length) {
+      return {
+        objects: [],
+        diagnostic:
+          "Build " +
+          BUILD_ID +
+          ": Raa IFC API-sok returnerte ingen objektdata" +
+          (diagnostics.length ? " (" + diagnostics.slice(-1)[0] + ")" : "."),
       };
     }
 
     return {
-      objects: normalizeObjects(await hydrateObjects(api, allObjects)).objects,
+      objects: normalizeObjects(objects).objects,
       diagnostic: "",
     };
   }
@@ -863,6 +878,26 @@
       .filter(Boolean);
   }
 
+  function extractGuidsFromExportResponse(response) {
+    return uniqueStrings(
+      extractObjectsFromResponse(response)
+        .map(function (item) {
+          if (typeof item === "string") {
+            return item;
+          }
+          return firstNonEmpty([
+            item.GUID,
+            item.guid,
+            item.GlobalId,
+            item.globalId,
+            item.ifcGuid,
+            buildObjectIdentity(item),
+          ]);
+        })
+        .filter(Boolean),
+    );
+  }
+
   function buildPageSignature(items) {
     return items
       .slice(0, 10)
@@ -872,6 +907,214 @@
       .join("|");
   }
 
+  async function createRawIfcApiContext(api) {
+    var projectId = "";
+    var buildingId = "1000";
+
+    try {
+      projectId = stringifyValue(await api.getProjectId()).trim();
+    } catch (error) {}
+
+    try {
+      var resolvedBuildingId = stringifyValue(await api.getBuildingId()).trim();
+      if (resolvedBuildingId) {
+        buildingId = resolvedBuildingId;
+      }
+    } catch (error) {}
+
+    return {
+      projectId: projectId,
+      buildingId: buildingId,
+      apiBase: buildRawIfcApiBase(projectId),
+    };
+  }
+
+  function buildRawIfcApiBase(projectId) {
+    var cleanedProjectId = String(projectId || "")
+      .trim()
+      .replace(/^\/+|\/+$/g, "");
+
+    if (!cleanedProjectId) {
+      return "";
+    }
+
+    if (/^project-\d+$/i.test(cleanedProjectId)) {
+      return "/" + cleanedProjectId + "/api/v1";
+    }
+
+    if (/^\d+$/.test(cleanedProjectId)) {
+      return "/project-" + cleanedProjectId + "/api/v1";
+    }
+
+    return "/" + cleanedProjectId + "/api/v1";
+  }
+
+  async function runRawIfcApiSearch(api, context, search) {
+    var errors = [];
+    var ruleVariants = buildRawIfcApiRuleVariants(context.buildingId, search);
+
+    for (var i = 0; i < ruleVariants.length; i += 1) {
+      try {
+        var createResponse = await makeApiJsonRequest(api, {
+          url: context.apiBase + "/ifc-searches",
+          method: "POST",
+          accept: "application/json",
+          contentType: "application/json",
+          body: { rules: [[ruleVariants[i]]] },
+        });
+        var searchId = extractSearchId(createResponse);
+        if (!searchId) {
+          continue;
+        }
+
+        var exportUrls = buildRawIfcExportUrls(context.apiBase, searchId);
+        for (var j = 0; j < exportUrls.length; j += 1) {
+          try {
+            var exportResponse = await makeApiJsonRequest(api, {
+              url: exportUrls[j],
+              method: "GET",
+              accept: "application/json",
+            });
+
+            if (extractGuidsFromExportResponse(exportResponse).length) {
+              return {
+                response: exportResponse,
+                diagnostic: "",
+              };
+            }
+          } catch (error) {
+            errors.push(getErrorMessage(error));
+          }
+        }
+      } catch (error) {
+        errors.push(getErrorMessage(error));
+      }
+    }
+
+    return {
+      response: [],
+      diagnostic:
+        "Raa IFC API fant ingen treff for " +
+        search.propertySet +
+        "." +
+        search.propertyName +
+        "=" +
+        (search.value === "" ? "<tomt sok>" : search.value) +
+        (errors.length ? " (siste feil: " + errors[errors.length - 1] + ")" : ""),
+    };
+  }
+
+  function buildRawIfcApiRuleVariants(buildingId, search) {
+    var variants = [];
+    var candidateKeys = buildSearchKeys(search.propertySet, search.propertyName);
+
+    if (search.propertySet && search.propertyName) {
+      variants.push(
+        compactObject({
+          buildingId: buildingId,
+          psetName: search.propertySet,
+          propKey: search.propertyName,
+          propValue: search.value,
+          operator: "=",
+        }),
+      );
+      variants.push(
+        compactObject({
+          buildingId: buildingId,
+          psetName: search.propertySet,
+          propKey: search.propertyName,
+          operator: "=",
+        }),
+      );
+    }
+
+    candidateKeys.forEach(function (candidateKey) {
+      variants.push(
+        compactObject({
+          buildingId: buildingId,
+          propKey: candidateKey,
+          propValue: search.value,
+          operator: "=",
+        }),
+      );
+      variants.push(
+        compactObject({
+          buildingId: buildingId,
+          propKey: candidateKey,
+          operator: "=",
+        }),
+      );
+    });
+
+    var seen = {};
+    return variants.filter(function (variant) {
+      var key = JSON.stringify(variant);
+      if (seen[key]) {
+        return false;
+      }
+      seen[key] = true;
+      return true;
+    });
+  }
+
+  function buildRawIfcExportUrls(apiBase, searchId) {
+    var encodedSearchId = encodeURIComponent(searchId);
+    var officialFieldNames = encodeURIComponent(
+      base64Encode("GUID|Name|Long Name|Description"),
+    );
+    var basicFieldNames = encodeURIComponent(base64Encode("GUID|Name"));
+
+    return uniqueStrings([
+      apiBase +
+        "/ifc-searches/export/json?searchId=" +
+        encodedSearchId +
+        "&fieldUnion=true&fieldNames=" +
+        officialFieldNames +
+        "&page[limit]=1000&page[skip]=0",
+      apiBase +
+        "/ifc-searches/export/json?searchId=" +
+        encodedSearchId +
+        "&fieldNames=" +
+        basicFieldNames +
+        "&page[limit]=1000&page[skip]=0",
+      apiBase +
+        "/ifc-searches/export/json?searchId=" +
+        encodedSearchId +
+        "&page[limit]=1000&page[skip]=0",
+    ]);
+  }
+
+  async function makeApiJsonRequest(api, request) {
+    var rawResponse = await api.makeApiRequest(request);
+    if (!rawResponse) {
+      return {};
+    }
+    if (typeof rawResponse === "string") {
+      try {
+        return JSON.parse(rawResponse);
+      } catch (error) {
+        return { raw: rawResponse };
+      }
+    }
+    return rawResponse;
+  }
+
+  function extractSearchId(response) {
+    return firstNonEmpty([
+      response && response.searchId,
+      response && response.id,
+      response && response.data && response.data.searchId,
+      response && response.data && response.data.id,
+    ]);
+  }
+
+  function base64Encode(value) {
+    if (typeof btoa === "function") {
+      return btoa(value);
+    }
+    return value;
+  }
+
   function firstAvailableMethod(api, candidates) {
     for (var i = 0; i < candidates.length; i += 1) {
       if (api && typeof api[candidates[i]] === "function") {
@@ -879,6 +1122,25 @@
       }
     }
     return "";
+  }
+
+  function mergeUniqueObjects(left, right) {
+    var merged = [];
+    var seen = {};
+    var allObjects = coerceArray(left).concat(coerceArray(right));
+
+    allObjects.forEach(function (object) {
+      var identity =
+        buildObjectIdentity(object) ||
+        JSON.stringify(object && (object.raw || object)).slice(0, 120);
+      if (!identity || seen[identity]) {
+        return;
+      }
+      seen[identity] = true;
+      merged.push(object);
+    });
+
+    return merged;
   }
 
   async function invokeMethodGuessing(api, methodName, argsList) {
@@ -2366,6 +2628,20 @@
 
     propertySets[propertySet] = propertySets[propertySet] || {};
     propertySets[propertySet][propertyName] = stringifyValue(value);
+  }
+
+  function compactObject(object) {
+    var result = {};
+
+    Object.keys(object || {}).forEach(function (key) {
+      var value = object[key];
+      if (value === "" || value === null || typeof value === "undefined") {
+        return;
+      }
+      result[key] = value;
+    });
+
+    return result;
   }
 
   function normalizeComparisonText(value) {
