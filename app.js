@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-search-clean-1";
+  var BUILD_ID = "2026-03-18-search-clean-2";
 
   var state = {
     streamBim: {
@@ -242,20 +242,20 @@
       typeof api.findObjects === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
-      targeted = await fetchViaApplicabilitySearch(api, specs);
-      if (targeted.objects.length) {
-        return targeted;
-      }
-      if (targeted.diagnostic) {
-        diagnostics.push(targeted.diagnostic);
-      }
-
       fallback = await fetchViaFindObjects(api);
       if (fallback.objects.length) {
         return fallback;
       }
       if (fallback.diagnostic) {
         diagnostics.push(fallback.diagnostic);
+      }
+
+      targeted = await fetchViaApplicabilitySearch(api, specs);
+      if (targeted.objects.length) {
+        return targeted;
+      }
+      if (targeted.diagnostic) {
+        diagnostics.push(targeted.diagnostic);
       }
     }
 
