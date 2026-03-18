@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-search-clean-4";
+  var BUILD_ID = "2026-03-18-bcf-2";
 
   var state = {
     streamBim: {
@@ -2095,12 +2095,25 @@
   async function createBcfIssue(group) {
     var api = state.streamBim.api;
     var methodName = getBcfMethodName(api);
+    var payload = buildBcfPayload(group);
 
-    if (!methodName) {
-      throw new Error(getBcfUnavailableMessage());
+    if (methodName) {
+      return invokeMethodGuessing(api, methodName, [
+        payload,
+        { issue: payload },
+        { topic: payload },
+      ]);
     }
 
-    var payload = {
+    if (supportsRawTopicCreation(api)) {
+      return createTopicViaRawApi(group, payload);
+    }
+
+    throw new Error(getBcfUnavailableMessage());
+  }
+
+  function buildBcfPayload(group) {
+    return {
       title: group.scopeLabel + ": " + group.title,
       description:
         group.description +
@@ -2117,7 +2130,14 @@
         "." +
         group.propertyName +
         "\nAntall objekter: " +
-        group.objects.length,
+        group.objects.length +
+        "\nGUID-er: " +
+        group.objects
+          .map(function (object) {
+            return object.guid || object.id || object.name;
+          })
+          .filter(Boolean)
+          .join(", "),
       labels: [
         "IDS",
         "SVV",
@@ -2134,12 +2154,72 @@
         };
       }),
     };
+  }
+  async function createTopicViaRawApi(group, payload) {
+    var api = state.streamBim.api;
+    var context = await createRawIfcApiContext(api);
 
-    return invokeMethodGuessing(api, methodName, [
-      payload,
-      { issue: payload },
-      { topic: payload },
-    ]);
+    if (!context.apiBase || !context.buildingId) {
+      throw new Error("Klarte ikke etablere prosjektkontekst for topics-endepunktet.");
+    }
+
+    var requestBody = {
+      data: {
+        attributes: {
+          "is-deleted": false,
+          channel: "workflows",
+          cost: "",
+          "send-notification": false,
+          "selected-count": null,
+          description: payload.description,
+          title: payload.title,
+          "due-date": null,
+          starred: false,
+          "is-draft": true,
+        },
+        relationships: {
+          "checklist-item-instance": {
+            data: null,
+          },
+          "document-revision": {
+            data: null,
+          },
+          building: {
+            data: {
+              type: "buildings",
+              id: String(context.buildingId),
+            },
+          },
+          "assigned-to-user": {
+            data: null,
+          },
+          "assigned-to-group": {
+            data: null,
+          },
+          status: {
+            data: {
+              type: "statuses",
+              id: "2000",
+            },
+          },
+          workflow: {
+            data: {
+              type: "workflows",
+              id: "1001",
+            },
+          },
+        },
+        type: "topics",
+      },
+    };
+
+    return makeApiJsonRequest(api, {
+      url: context.apiBase + "/v2/topics",
+      method: "POST",
+      accept: "application/json",
+      contentType: "application/json",
+      body: requestBody,
+    });
   }
 
   function getBcfMethodName(api) {
@@ -2152,15 +2232,21 @@
     ]);
   }
 
+  function supportsRawTopicCreation(api) {
+    return !!(
+      api &&
+      typeof api.makeApiRequest === "function" &&
+      typeof api.getProjectId === "function" &&
+      typeof api.getBuildingId === "function"
+    );
+  }
+
   function supportsBcfCreation(api) {
-    return !!getBcfMethodName(api);
+    return !!(getBcfMethodName(api) || supportsRawTopicCreation(api));
   }
 
   function getBcfUnavailableMessage() {
-    var hasRawApi = state.streamBim.methods.indexOf("makeApiRequest") !== -1;
-    return hasRawApi
-      ? "Denne StreamBIM-instansen eksponerer ingen BCF-/issue-metode til widgeter. makeApiRequest(...) finnes, men widget-API-et dokumenterer ikke noe BCF-endepunkt."
-      : "Denne StreamBIM-instansen eksponerer ingen BCF-/issue-metode til widgeter.";
+    return "Denne StreamBIM-instansen eksponerer ingen direkte BCF-metode, og widgeten mangler prosjekt-API for fallback til topics-endepunktet.";
   }
 
   function updateBcfUi() {
