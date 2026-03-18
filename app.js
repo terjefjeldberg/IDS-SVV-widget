@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-search-clean-2";
+  var BUILD_ID = "2026-03-18-search-clean-3";
 
   var state = {
     streamBim: {
@@ -237,26 +237,43 @@
     var diagnostics = [];
     var targeted = { objects: [], diagnostic: "" };
     var fallback = { objects: [], diagnostic: "" };
+    var best = { objects: [], diagnostic: "" };
+
+    if (
+      typeof api.getObjectInfoForSearch === "function" &&
+      typeof api.getObjectInfo === "function"
+    ) {
+      fallback = await fetchViaGenericObjectInfoSearch(api);
+      if (fallback.objects.length > best.objects.length) {
+        best = fallback;
+      } else if (fallback.diagnostic) {
+        diagnostics.push(fallback.diagnostic);
+      }
+    }
 
     if (
       typeof api.findObjects === "function" &&
       typeof api.getObjectInfo === "function"
     ) {
       fallback = await fetchViaFindObjects(api);
-      if (fallback.objects.length) {
-        return fallback;
-      }
-      if (fallback.diagnostic) {
+      if (fallback.objects.length > best.objects.length) {
+        best = fallback;
+      } else if (fallback.diagnostic) {
         diagnostics.push(fallback.diagnostic);
       }
 
-      targeted = await fetchViaApplicabilitySearch(api, specs);
-      if (targeted.objects.length) {
-        return targeted;
+      if (!best.objects.length) {
+        targeted = await fetchViaApplicabilitySearch(api, specs);
+        if (targeted.objects.length) {
+          best = targeted;
+        } else if (targeted.diagnostic) {
+          diagnostics.push(targeted.diagnostic);
+        }
       }
-      if (targeted.diagnostic) {
-        diagnostics.push(targeted.diagnostic);
-      }
+    }
+
+    if (best.objects.length) {
+      return best;
     }
 
     var genericObjectMethods = [
@@ -439,6 +456,75 @@
 
     return {
       objects: normalizeObjects(uniqueObjects).objects,
+      diagnostic: "",
+    };
+  }
+
+  async function fetchViaGenericObjectInfoSearch(api) {
+    var pageSize = 200;
+    var skip = 0;
+    var pageIndex = 0;
+    var allObjects = [];
+    var lastSignature = "";
+    var errors = [];
+
+    while (pageIndex < 100) {
+      try {
+        var response = await invokeMethodGuessing(api, "getObjectInfoForSearch", [
+          {
+            page: { limit: pageSize, skip: skip },
+            fieldUnion: true,
+          },
+          {
+            filter: {},
+            page: { limit: pageSize, skip: skip },
+            fieldUnion: true,
+          },
+          {
+            page: { limit: pageSize, skip: skip },
+          },
+          {
+            filter: {},
+            page: { limit: pageSize, skip: skip },
+          },
+        ]);
+        var pageObjects = extractObjectsFromResponse(response);
+        if (!pageObjects.length) {
+          break;
+        }
+
+        var signature = buildPageSignature(pageObjects);
+        if (pageIndex > 0 && signature && signature === lastSignature) {
+          break;
+        }
+
+        allObjects = allObjects.concat(pageObjects);
+        lastSignature = signature;
+        if (pageObjects.length < pageSize) {
+          break;
+        }
+
+        skip += pageSize;
+        pageIndex += 1;
+      } catch (error) {
+        errors.push(getErrorMessage(error));
+        break;
+      }
+    }
+
+    if (!allObjects.length) {
+      return {
+        objects: [],
+        diagnostic:
+          "Build " +
+          BUILD_ID +
+          ": Generell getObjectInfoForSearch-fallback returnerte ingen objektdata" +
+          (errors.length ? " (siste feil: " + errors[errors.length - 1] + ")" : "."),
+      };
+    }
+
+    return {
+      objects: normalizeObjects(await hydrateObjects(api, allObjects)).objects,
       diagnostic: "",
     };
   }
