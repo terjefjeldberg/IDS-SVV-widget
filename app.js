@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-debug-4";
+  var BUILD_ID = "2026-03-27-debug-5";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -366,6 +366,28 @@
       }
     }
 
+    if (
+      best.objects.length &&
+      typeof api.makeApiRequest === "function" &&
+      typeof api.getProjectId === "function" &&
+      typeof api.getBuildingId === "function"
+    ) {
+      try {
+        best.objects = await hydrateMissingRulePropertiesViaRawIfc(
+          api,
+          specs,
+          best.objects,
+        );
+      } catch (error) {
+        diagnostics.push(
+          "Build " +
+            BUILD_ID +
+            ": Raa property-hydrering feilet: " +
+            getErrorMessage(error),
+        );
+      }
+    }
+
     if (best.objects.length) {
       return best;
     }
@@ -688,6 +710,209 @@
     }
 
     return { objects: hydrated };
+  }
+
+  async function hydrateMissingRulePropertiesViaRawIfc(api, specs, objects) {
+    var context = await createRawIfcApiContext(api);
+    if (!context.apiBase) {
+      return objects;
+    }
+
+    var relevantRules = collectRelevantPropertyRules(specs);
+    if (!relevantRules.length) {
+      return objects;
+    }
+
+    var cache = {};
+    var hydrated = [];
+
+    for (var i = 0; i < objects.length; i += 1) {
+      var object = objects[i];
+      if (!objectNeedsRuleHydration(object, relevantRules)) {
+        hydrated.push(object);
+        continue;
+      }
+
+      var guid = pickFirst(object || {}, [
+        "guid",
+        "globalId",
+        "ifcGuid",
+        "GlobalId",
+      ]);
+      if (!guid) {
+        hydrated.push(object);
+        continue;
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(cache, guid)) {
+        cache[guid] = await fetchRawObjectByGuid(api, context, guid);
+      }
+
+      if (cache[guid]) {
+        var rawPropertySets = extractPropertySets(cache[guid]);
+        hydrated.push(
+          Object.assign({}, mergeObjectPayloads(object, cache[guid]), {
+            propertySets: mergePropertySets(
+              object.propertySets,
+              rawPropertySets,
+            ),
+          }),
+        );
+        continue;
+      }
+
+      hydrated.push(object);
+    }
+
+    return hydrated;
+  }
+
+  function collectRelevantPropertyRules(specs) {
+    var seen = {};
+    var rules = [];
+
+    coerceArray(specs).forEach(function (spec) {
+      coerceArray(spec && spec.applicability)
+        .concat(coerceArray(spec && spec.requirements))
+        .forEach(function (rule) {
+          if (!rule || !rule.propertySet || !rule.baseName) {
+            return;
+          }
+          var key = [rule.propertySet, rule.baseName].join("::");
+          if (seen[key]) {
+            return;
+          }
+          seen[key] = true;
+          rules.push(rule);
+        });
+    });
+
+    return rules;
+  }
+
+  function objectNeedsRuleHydration(object, rules) {
+    return coerceArray(rules).some(function (rule) {
+      return !hasReadableValue(
+        getPropertyValue(object, rule.propertySet, rule.baseName),
+      );
+    });
+  }
+
+  async function fetchRawObjectByGuid(api, context, guid) {
+    var variants = buildGuidSearchRuleVariants(context.buildingId, guid);
+
+    for (var i = 0; i < variants.length; i += 1) {
+      try {
+        var createResponse = await makeApiJsonRequest(api, {
+          url: context.apiBase + "/ifc-searches",
+          method: "POST",
+          accept: "application/json",
+          contentType: "application/json",
+          body: { rules: [[variants[i]]] },
+        });
+
+        var directItems = extractObjectsFromResponse(createResponse);
+        for (var j = 0; j < directItems.length; j += 1) {
+          if (Object.keys(extractPropertySets(directItems[j])).length) {
+            return directItems[j];
+          }
+        }
+
+        var searchId = extractSearchId(createResponse);
+        if (!searchId) {
+          continue;
+        }
+
+        var exportRequests = buildRawGuidExportRequests(
+          context.apiBase,
+          searchId,
+        );
+        for (var k = 0; k < exportRequests.length; k += 1) {
+          try {
+            var exportResponse = await makeApiJsonRequest(api, {
+              url: exportRequests[k].url,
+              method: "GET",
+              accept: "application/json",
+            });
+            var exportItems = extractObjectsFromResponse(exportResponse);
+            for (var m = 0; m < exportItems.length; m += 1) {
+              if (
+                normalizeComparisonText(
+                  firstNonEmpty([
+                    exportItems[m] && exportItems[m].GUID,
+                    exportItems[m] && exportItems[m].guid,
+                    exportItems[m] && exportItems[m].GlobalId,
+                    exportItems[m] && exportItems[m].globalId,
+                    buildObjectIdentity(exportItems[m]),
+                  ]),
+                ) === normalizeComparisonText(guid)
+              ) {
+                return exportItems[m];
+              }
+            }
+          } catch (error) {}
+        }
+      } catch (error) {}
+    }
+
+    return null;
+  }
+
+  function buildGuidSearchRuleVariants(buildingId, guid) {
+    var variants = [
+      compactObject({
+        buildingId: buildingId,
+        propKey: "GUID",
+        propValue: guid,
+        operator: "=",
+      }),
+      compactObject({
+        buildingId: buildingId,
+        propKey: "GlobalId",
+        propValue: guid,
+        operator: "=",
+      }),
+      compactObject({
+        buildingId: buildingId,
+        propKey: "ifcGuid",
+        propValue: guid,
+        operator: "=",
+      }),
+    ];
+
+    var seen = {};
+    return variants.filter(function (variant) {
+      var key = JSON.stringify(variant);
+      if (seen[key]) {
+        return false;
+      }
+      seen[key] = true;
+      return true;
+    });
+  }
+
+  function buildRawGuidExportRequests(apiBase, searchId) {
+    var encodedSearchId = encodeURIComponent(searchId);
+    return [
+      {
+        key: "plain-export",
+        url:
+          apiBase +
+          "/ifc-searches/export/json?searchId=" +
+          encodedSearchId +
+          "&page[limit]=1000&page[skip]=0",
+      },
+      {
+        key: "basic-fields",
+        url:
+          apiBase +
+          "/ifc-searches/export/json?searchId=" +
+          encodedSearchId +
+          "&fieldNames=" +
+          encodeURIComponent(base64Encode("GUID|Name")) +
+          "&page[limit]=1000&page[skip]=0",
+      },
+    ];
   }
 
   function addApplicabilitySearch(searchMap, target, search) {
