@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-18-applicability-6";
+  var BUILD_ID = "2026-03-27-results-1";
 
   var state = {
     streamBim: {
@@ -205,32 +205,37 @@
 
       if (!report.summary.applicableObjectCount) {
         var noMatchMessage =
-          "Validering ferdig, men ingen objekter matchet IDS applicability lokalt.";
+          "Validering ferdig, men ingen objekter ble vurdert mot kravene i IDS-en.";
         var uniqueObjectCount = countUniqueObjects(modelData.objects || []);
         if (uniqueObjectCount) {
           noMatchMessage +=
             " Widgeten leste " +
             uniqueObjectCount +
-            " modellobjekter, men ingen av dem passerte applicability-reglene.";
+            " objekter, men fant ingen som var relevante for denne IDS-en.";
         }
-        if (modelData.diagnostic) {
-          noMatchMessage += " " + modelData.diagnostic;
-        } else {
-          noMatchMessage +=
-            " Dette tyder pa at property-navn eller property-verdier fra StreamBIM fortsatt ikke treffer IDS-en.";
-        }
+        noMatchMessage +=
+          " Sjekk at utvalget i IDS-en bruker property-navn og verdier som faktisk finnes i StreamBIM.";
         setRunStatus(noMatchMessage, "state-warn");
       } else {
-        setRunStatus(
-          "Validering ferdig. " +
-            report.summary.scopeCount +
-            " modellag sjekket, " +
-            report.groups.length +
-            " feilgrupper opprettet fra " +
-            report.summary.failedChecks +
-            " avvik.",
-          report.groups.length ? "state-warn" : "state-ok",
-        );
+        if (report.groups.length) {
+          setRunStatus(
+            "Validering ferdig. " +
+              report.summary.scopeCount +
+              " modellag sjekket, " +
+              report.groups.length +
+              " feilgrupper med " +
+              report.summary.failedChecks +
+              " verdiavvik.",
+            "state-warn",
+          );
+        } else {
+          setRunStatus(
+            "Validering ferdig. " +
+              report.summary.scopeCount +
+              " modellag sjekket. Ingen verdiavvik funnet.",
+            "state-ok",
+          );
+        }
       }
     } catch (error) {
       state.validation = null;
@@ -2386,7 +2391,7 @@
 
   function buildGroupDescription(rule, outcome) {
     if (outcome.reasonCode === "missing-required") {
-      return "Objektene matcher applicability, men mangler en verdi som IDS krever.";
+      return "Objektene mangler en verdi som IDS krever.";
     }
     if (
       outcome.reasonCode === "invalid-value" ||
@@ -2525,7 +2530,7 @@
               scope.objectCount +
                 " objekter, " +
                 scope.summary.applicableObjectCount +
-                " matcher IDS applicability, " +
+                " vurdert mot IDS, " +
                 scope.groups.length +
                 " feilgrupper",
             ) +
