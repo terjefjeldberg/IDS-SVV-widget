@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-debug-1";
+  var BUILD_ID = "2026-03-27-debug-2";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -262,6 +262,20 @@
     var fallback = { objects: [], diagnostic: "" };
     var best = { objects: [], diagnostic: "" };
     var collectedObjects = [];
+    var genericObjectMethods = [
+      "getObjectsWithProperties",
+      "getModelObjectsWithProperties",
+      "getAllObjectsWithProperties",
+      "getObjects",
+      "getModelObjects",
+      "getElements",
+      "getAllObjects",
+      "getItems",
+    ];
+    var genericMethodAvailable = firstAvailableMethod(
+      api,
+      genericObjectMethods,
+    );
 
     if (
       typeof api.findObjects === "function" &&
@@ -333,22 +347,30 @@
       }
     }
 
+    if (best.objects.length && genericMethodAvailable) {
+      try {
+        var generic = await fetchViaGenericObjectMethods(api);
+        if (generic.objects.length) {
+          best = {
+            objects: mergeUniqueObjects(best.objects, generic.objects),
+            diagnostic: best.diagnostic || generic.diagnostic || "",
+          };
+        }
+      } catch (error) {
+        diagnostics.push(
+          "Build " +
+            BUILD_ID +
+            ": Bred property-hydrering feilet: " +
+            getErrorMessage(error),
+        );
+      }
+    }
+
     if (best.objects.length) {
       return best;
     }
 
-    var genericObjectMethods = [
-      "getObjectsWithProperties",
-      "getModelObjectsWithProperties",
-      "getAllObjectsWithProperties",
-      "getObjects",
-      "getModelObjects",
-      "getElements",
-      "getAllObjects",
-      "getItems",
-    ];
-
-    if (firstAvailableMethod(api, genericObjectMethods)) {
+    if (genericMethodAvailable) {
       return fetchViaGenericObjectMethods(api);
     }
 
