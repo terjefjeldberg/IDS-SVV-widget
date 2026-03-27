@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-groups-1";
+  var BUILD_ID = "2026-03-27-value-fix-1";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -2992,7 +2992,7 @@
 
     if (valueRule.type === "pattern") {
       try {
-        return new RegExp(valueRule.value).test(actual);
+        return new RegExp(anchorPattern(valueRule.value)).test(actual);
       } catch (error) {
         return false;
       }
@@ -3065,7 +3065,7 @@
       }
     }
 
-    var flatKeys = buildSearchKeys(propertySet, propertyName);
+    var flatKeys = buildPropertyLookupKeys(propertySet, propertyName);
     for (var i = 0; i < flatKeys.length; i += 1) {
       if (
         object.propertySets.__flat__ &&
@@ -3088,6 +3088,14 @@
 
     var setNames = Object.keys(object.propertySets);
     for (var j = 0; j < setNames.length; j += 1) {
+      if (
+        propertySet &&
+        !keysLooselyMatch(setNames[j], propertySet) &&
+        setNames[j] !== "__flat__"
+      ) {
+        continue;
+      }
+
       if (
         propertyName &&
         Object.prototype.hasOwnProperty.call(
@@ -3117,6 +3125,17 @@
     }
 
     return null;
+  }
+
+  function buildPropertyLookupKeys(propertySet, propertyName) {
+    var keys = buildSearchKeys(propertySet, propertyName);
+    if (!propertySet) {
+      return keys;
+    }
+
+    return keys.filter(function (key) {
+      return !!splitCompositePropertyKey(key);
+    });
   }
 
   function buildGroupTitle(spec, rule, outcome) {
@@ -3318,6 +3337,10 @@
         var hasValue = hasReadableValue(actual);
 
         if (!isApplicable && !hasValue) {
+          return;
+        }
+
+        if (!hasValue) {
           return;
         }
 
@@ -4208,6 +4231,17 @@
     }
 
     return false;
+  }
+
+  function anchorPattern(pattern) {
+    var source = String(pattern || "").trim();
+    if (!source) {
+      return ".*";
+    }
+    if (source.charAt(0) === "^" && source.charAt(source.length - 1) === "$") {
+      return source;
+    }
+    return "^(?:" + source + ")$";
   }
 
   function buildComparisonAliases(value) {
