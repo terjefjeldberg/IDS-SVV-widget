@@ -2003,8 +2003,10 @@
           );
           var outcome = evaluateRule(actual, rule);
           if (outcome.ok) {
-            passedChecks += 1;
-            specStatusesByName[specName].passedChecks += 1;
+            if (!outcome.ignored) {
+              passedChecks += 1;
+              specStatusesByName[specName].passedChecks += 1;
+            }
             return;
           }
 
@@ -2181,10 +2183,13 @@
       String(actualValue).trim() !== "";
     var matches = matchValueRule(actualValue, rule.valueRule);
 
+    // Only value mismatches should be reported as deviations. Missing
+    // properties are ignored for validation reporting.
+    if (!hasValue) {
+      return { ok: true, ignored: true, reasonCode: "missing-ignored" };
+    }
+
     if (rule.cardinality === "required") {
-      if (!hasValue) {
-        return { ok: false, reasonCode: "missing-required" };
-      }
       if (!matches) {
         return { ok: false, reasonCode: "invalid-value" };
       }
@@ -2192,9 +2197,6 @@
     }
 
     if (rule.cardinality === "optional") {
-      if (!hasValue) {
-        return { ok: true };
-      }
       if (!matches) {
         return { ok: false, reasonCode: "invalid-optional-value" };
       }
@@ -2202,9 +2204,6 @@
     }
 
     if (rule.cardinality === "prohibited") {
-      if (!hasValue) {
-        return { ok: true };
-      }
       if (matches) {
         return { ok: false, reasonCode: "prohibited-value" };
       }
@@ -2486,8 +2485,13 @@
       Number(specStatus && specStatus.applicableObjectCount) || 0;
     var passed = Number(specStatus && specStatus.passedChecks) || 0;
     var failed = Number(specStatus && specStatus.failedChecks) || 0;
+    var evaluated = passed + failed;
 
-    if (failed === 0 && applicable > 0) {
+    if (applicable > 0 && evaluated === 0) {
+      return { label: "Ikke vurdert", className: "status-partial" };
+    }
+
+    if (failed === 0 && passed > 0) {
       return { label: "Suksess", className: "status-success" };
     }
     if (failed > 0 && passed > 0) {
