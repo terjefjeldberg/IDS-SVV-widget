@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-bcf-1";
+  var BUILD_ID = "2026-03-27-bcf-capture-1";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -3570,7 +3570,7 @@
     try {
       await createBcfIssue(group);
       setRunStatus(
-        'BCF opprettet for gruppen "' +
+        'BCF med capture opprettet for gruppen "' +
           group.title +
           '" i ' +
           group.scopeLabel +
@@ -3624,7 +3624,10 @@
       }
     }
 
-    setRunStatus("BCF opprettet for " + created + " grupper.", "state-ok");
+    setRunStatus(
+      "BCF med capture opprettet for " + created + " grupper.",
+      "state-ok",
+    );
   }
 
   async function createBcfIssue(group) {
@@ -3765,18 +3768,44 @@
     });
 
     var topicId = extractTopicId(topicResponse);
-    if (topicId) {
-      try {
-        await createTopicViewpointViaRawApi(api, context, topicId);
-      } catch (error) {
-        console.warn(
-          "[IDS SVV] Topic opprettet, men viewpoint feilet:",
-          getErrorMessage(error),
-        );
-      }
+    if (!topicId) {
+      throw new Error("Topics-endepunktet returnerte ingen topic-id.");
     }
 
-    return topicResponse;
+    var viewpointResponse = await createTopicViewpointViaRawApi(
+      api,
+      context,
+      topicId,
+    );
+    var viewpointId = extractViewpointId(viewpointResponse);
+    if (!viewpointId) {
+      throw new Error(
+        "Topic " + topicId + " ble opprettet, men viewpoint mangler.",
+      );
+    }
+
+    try {
+      await createTopicCaptureAttachmentViaRawApi(
+        api,
+        context,
+        viewpointId,
+        group,
+      );
+    } catch (error) {
+      throw new Error(
+        "Topic " +
+          topicId +
+          " ble opprettet, men capture feilet: " +
+          getErrorMessage(error),
+      );
+    }
+
+    return {
+      topic: topicResponse,
+      viewpoint: viewpointResponse,
+      topicId: topicId,
+      viewpointId: viewpointId,
+    };
   }
 
   async function createTopicViewpointViaRawApi(api, context, topicId) {
@@ -3815,6 +3844,140 @@
             },
           },
           type: "topic-viewpoints",
+        },
+      },
+    });
+  }
+
+  async function createTopicCaptureAttachmentViaRawApi(
+    api,
+    context,
+    viewpointId,
+    group,
+  ) {
+    if (!api || typeof api.takeScreenshot !== "function") {
+      throw new Error("Widget-API eksponerer ikke takeScreenshot().");
+    }
+
+    var screenshot = await api.takeScreenshot();
+    if (
+      typeof screenshot !== "string" ||
+      screenshot.indexOf("data:image/") !== 0
+    ) {
+      throw new Error("takeScreenshot() returnerte ingen gyldig capture.");
+    }
+
+    var captureFile = dataUrlToUploadFile(
+      screenshot,
+      buildCaptureFilename(group),
+    );
+    var uploadTicketResponse = await createUploadTicketViaRawApi(
+      api,
+      context,
+      captureFile,
+    );
+    var uploadTicketId = extractUploadTicketId(uploadTicketResponse);
+    if (!uploadTicketId) {
+      throw new Error("Upload-ticket ble ikke opprettet.");
+    }
+
+    await uploadCaptureBinary(
+      context,
+      uploadTicketId,
+      captureFile,
+      uploadTicketResponse,
+    );
+
+    var attachmentResponse = await createCaptureAttachmentViaRawApi(
+      api,
+      context,
+      viewpointId,
+      uploadTicketId,
+    );
+    var attachmentId = extractAttachmentId(attachmentResponse);
+    if (!attachmentId) {
+      throw new Error("Attachment-endepunktet returnerte ingen attachment-id.");
+    }
+
+    return attachmentResponse;
+  }
+
+  async function createUploadTicketViaRawApi(api, context, file) {
+    return makeApiJsonRequest(api, {
+      url: context.apiBase + "/v2/upload-tickets",
+      method: "POST",
+      accept: "application/vnd.api+json",
+      contentType: "application/vnd.api+json",
+      body: {
+        data: {
+          attributes: {
+            filename: file.name,
+            "file-size": file.size,
+            "last-modified": new Date(
+              file.lastModified || Date.now(),
+            ).toISOString(),
+          },
+          type: "upload-tickets",
+        },
+      },
+    });
+  }
+
+  async function uploadCaptureBinary(
+    context,
+    uploadTicketId,
+    file,
+    uploadTicketResponse,
+  ) {
+    var uploadUrl =
+      extractUploadBinaryUrl(uploadTicketResponse) ||
+      buildAbsoluteApiUrl(context.apiBase + "/documents/_upload");
+    if (!uploadUrl) {
+      throw new Error("Klarte ikke bygge absolutt upload-url.");
+    }
+
+    var formData = new FormData();
+    formData.append("file", file, file.name);
+    formData.append("id", uploadTicketId);
+
+    await postMultipartFormData(uploadUrl, formData, getStreamBimAuthToken());
+  }
+
+  async function createCaptureAttachmentViaRawApi(
+    api,
+    context,
+    viewpointId,
+    uploadTicketId,
+  ) {
+    return makeApiJsonRequest(api, {
+      url: context.apiBase + "/v2/attachments",
+      method: "POST",
+      accept: "application/vnd.api+json",
+      contentType: "application/vnd.api+json",
+      body: {
+        data: {
+          attributes: {
+            category: "screenshot",
+            "creation-method": "UPLOAD",
+            metadata: {
+              preview: true,
+            },
+          },
+          relationships: {
+            parent: {
+              data: {
+                type: "topic-viewpoints",
+                id: String(viewpointId),
+              },
+            },
+            "upload-ticket": {
+              data: {
+                type: "upload-tickets",
+                id: String(uploadTicketId),
+              },
+            },
+          },
+          type: "attachments",
         },
       },
     });
@@ -3862,6 +4025,261 @@
         response.data.topic &&
         response.data.topic.id,
     ]);
+  }
+
+  function extractViewpointId(response) {
+    return firstNonEmpty([
+      response && response.data && response.data.id,
+      response && response.id,
+      response &&
+        response.data &&
+        response.data.viewpoint &&
+        response.data.viewpoint.id,
+    ]);
+  }
+
+  function extractUploadTicketId(response) {
+    return firstNonEmpty([
+      response && response.data && response.data.id,
+      response && response.id,
+      response &&
+        response.data &&
+        response.data["upload-ticket"] &&
+        response.data["upload-ticket"].id,
+    ]);
+  }
+
+  function extractAttachmentId(response) {
+    return firstNonEmpty([
+      response && response.data && response.data.id,
+      response && response.id,
+      response &&
+        response.data &&
+        response.data.attachment &&
+        response.data.attachment.id,
+    ]);
+  }
+
+  function extractUploadBinaryUrl(response) {
+    var candidates = [
+      response &&
+        response.data &&
+        response.data.attributes &&
+        response.data.attributes["upload-url"],
+      response &&
+        response.data &&
+        response.data.attributes &&
+        response.data.attributes.uploadUrl,
+      response &&
+        response.data &&
+        response.data.attributes &&
+        response.data.attributes.url,
+      response &&
+        response.data &&
+        response.data.links &&
+        response.data.links.upload,
+      response && response.uploadUrl,
+      response && response.url,
+    ].filter(Boolean);
+
+    for (var i = 0; i < candidates.length; i += 1) {
+      var candidate = String(candidates[i] || "").trim();
+      if (!candidate) {
+        continue;
+      }
+      if (/^https?:\/\//i.test(candidate) || candidate.charAt(0) === "/") {
+        return buildAbsoluteApiUrl(candidate);
+      }
+    }
+
+    return "";
+  }
+
+  function buildCaptureFilename(group) {
+    var scope =
+      String((group && group.scopeLabel) || "ids")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "ids";
+    return "ids-svv-" + scope + "-" + Date.now() + ".jpg";
+  }
+
+  function dataUrlToUploadFile(dataUrl, filename) {
+    var parts = String(dataUrl || "").split(",");
+    if (parts.length < 2) {
+      throw new Error("Ugyldig data-url for screenshot.");
+    }
+
+    var mimeMatch = parts[0].match(/^data:([^;]+);base64$/i);
+    var mimeType = mimeMatch && mimeMatch[1] ? mimeMatch[1] : "image/jpeg";
+    var binary = atob(parts[1]);
+    var bytes = new Uint8Array(binary.length);
+
+    for (var i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+
+    try {
+      return new File([bytes], filename, {
+        type: mimeType,
+        lastModified: Date.now(),
+      });
+    } catch (error) {
+      var blob = new Blob([bytes], { type: mimeType });
+      blob.name = filename;
+      blob.lastModified = Date.now();
+      return blob;
+    }
+  }
+
+  function buildAbsoluteApiUrl(url) {
+    if (!url) {
+      return "";
+    }
+    if (/^https?:\/\//i.test(url)) {
+      return url;
+    }
+
+    var origins = [];
+
+    function addOrigin(candidate) {
+      if (!candidate || origins.indexOf(candidate) >= 0) {
+        return;
+      }
+      origins.push(candidate);
+    }
+
+    try {
+      if (document.referrer) {
+        addOrigin(new URL(document.referrer).origin);
+      }
+    } catch (error) {}
+
+    try {
+      if (window.parent && window.parent.location) {
+        addOrigin(window.parent.location.origin);
+      }
+    } catch (error) {}
+
+    try {
+      if (window.top && window.top.location) {
+        addOrigin(window.top.location.origin);
+      }
+    } catch (error) {}
+
+    try {
+      addOrigin(window.location.origin);
+    } catch (error) {}
+
+    return origins.length ? origins[0] + url : url;
+  }
+
+  function getStreamBimAuthToken() {
+    var windowsToCheck = [];
+
+    function addWindow(candidate) {
+      if (!candidate || windowsToCheck.indexOf(candidate) >= 0) {
+        return;
+      }
+      windowsToCheck.push(candidate);
+    }
+
+    addWindow(window);
+
+    try {
+      addWindow(window.parent);
+    } catch (error) {}
+
+    try {
+      addWindow(window.top);
+    } catch (error) {}
+
+    for (var i = 0; i < windowsToCheck.length; i += 1) {
+      var token = extractAuthTokenFromWindow(windowsToCheck[i]);
+      if (token) {
+        return token;
+      }
+    }
+
+    return "";
+  }
+
+  function extractAuthTokenFromWindow(targetWindow) {
+    if (!targetWindow) {
+      return "";
+    }
+
+    var storages = [];
+    try {
+      if (targetWindow.localStorage) {
+        storages.push(targetWindow.localStorage);
+      }
+    } catch (error) {}
+
+    try {
+      if (targetWindow.sessionStorage) {
+        storages.push(targetWindow.sessionStorage);
+      }
+    } catch (error) {}
+
+    var keys = ["ember_simple_auth-session", "ember-simple-auth-session"];
+
+    for (var i = 0; i < storages.length; i += 1) {
+      for (var j = 0; j < keys.length; j += 1) {
+        try {
+          var raw = storages[i].getItem(keys[j]);
+          if (!raw) {
+            continue;
+          }
+          var parsed = JSON.parse(raw);
+          var token = firstNonEmpty([
+            parsed && parsed.authenticated && parsed.authenticated.idToken,
+            parsed && parsed.authenticated && parsed.authenticated.accessToken,
+            parsed &&
+              parsed.data &&
+              parsed.data.authenticated &&
+              parsed.data.authenticated.idToken,
+            parsed &&
+              parsed.data &&
+              parsed.data.authenticated &&
+              parsed.data.authenticated.accessToken,
+            parsed && parsed.idToken,
+            parsed && parsed.accessToken,
+          ]);
+          if (token) {
+            return String(token);
+          }
+        } catch (error) {}
+      }
+    }
+
+    return "";
+  }
+
+  function postMultipartFormData(url, formData, bearerToken) {
+    return new Promise(function (resolve, reject) {
+      var request = new XMLHttpRequest();
+      request.open("POST", url, true);
+      request.withCredentials = true;
+      if (bearerToken) {
+        request.setRequestHeader("Authorization", "Bearer " + bearerToken);
+      }
+      request.onload = function () {
+        if (request.status >= 200 && request.status < 300) {
+          resolve(request.responseText);
+          return;
+        }
+        reject(
+          new Error(
+            "Screenshot-upload feilet med HTTP " + request.status + ".",
+          ),
+        );
+      };
+      request.onerror = function () {
+        reject(new Error("Nettverksfeil under screenshot-upload."));
+      };
+      request.send(formData);
+    });
   }
 
   function getBcfMethodName(api) {
