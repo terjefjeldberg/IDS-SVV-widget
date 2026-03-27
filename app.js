@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-debug-3";
+  var BUILD_ID = "2026-03-27-debug-4";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -950,7 +950,8 @@
 
     for (var i = 0; i < candidates.length; i += 1) {
       try {
-        return await api.getObjectInfo(candidates[i]);
+        var detail = await api.getObjectInfo(candidates[i]);
+        return await hydrateObjectPropertiesIfNeeded(api, object, detail);
       } catch (error) {}
     }
 
@@ -982,13 +983,73 @@
         for (var j = 0; j < resolvedCandidates.length; j += 1) {
           try {
             var resolvedDetail = await api.getObjectInfo(resolvedCandidates[j]);
-            return mergeObjectPayloads(resolved, resolvedDetail);
+            return await hydrateObjectPropertiesIfNeeded(
+              api,
+              mergeObjectPayloads(object, resolved),
+              mergeObjectPayloads(resolved, resolvedDetail),
+            );
           } catch (error) {}
         }
       }
     }
 
-    return object;
+    return await hydrateObjectPropertiesIfNeeded(api, object, object);
+  }
+
+  async function hydrateObjectPropertiesIfNeeded(
+    api,
+    baseObject,
+    detailObject,
+  ) {
+    var merged = mergeObjectPayloads(baseObject, detailObject);
+    if (Object.keys(extractPropertySets(merged)).length) {
+      return merged;
+    }
+
+    var propertyMethod = firstAvailableMethod(api, [
+      "getObjectProperties",
+      "getProperties",
+      "getPropertiesForObject",
+      "getItemProperties",
+      "getObjectById",
+    ]);
+    if (!propertyMethod) {
+      return merged;
+    }
+
+    var guid = pickFirst(merged || {}, [
+      "guid",
+      "globalId",
+      "ifcGuid",
+      "GlobalId",
+    ]);
+    var id = pickFirst(merged || {}, ["id", "objectId", "dbId", "expressId"]);
+    var candidates = [];
+
+    if (guid) {
+      candidates.push({ guid: guid });
+    }
+    if (id) {
+      candidates.push({ id: id });
+    }
+    if (guid) {
+      candidates.push(guid);
+    }
+    if (id && id !== guid) {
+      candidates.push(id);
+    }
+    candidates.push(merged);
+
+    try {
+      var propertyPayload = await invokeMethodGuessing(
+        api,
+        propertyMethod,
+        candidates,
+      );
+      return mergeObjectPayloads(merged, propertyPayload);
+    } catch (error) {
+      return merged;
+    }
   }
 
   async function resolveObjectCandidateByGuid(api, guid) {
