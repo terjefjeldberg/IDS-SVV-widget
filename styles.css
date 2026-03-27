@@ -237,6 +237,16 @@ input {
     border: 1px solid rgba(255, 90, 31, 0.25);
 }
 
+.btn-working {
+    background: linear-gradient(135deg, #c87410, #f1ab48);
+    color: #fff;
+}
+
+.btn-success {
+    background: linear-gradient(135deg, var(--ok), #42b87a);
+    color: #fff;
+}
+
 .metrics {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

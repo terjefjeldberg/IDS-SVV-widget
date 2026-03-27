@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-value-fix-1";
+  var BUILD_ID = "2026-03-27-bcf-1";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -3542,15 +3542,19 @@
       .forEach(function (button) {
         button.addEventListener("click", function () {
           var groupIndex = Number(button.getAttribute("data-group-index"));
-          createBcfForGroup(groupIndex);
+          createBcfForGroup(groupIndex, button);
         });
       });
 
     updateBcfUi();
   }
 
-  async function createBcfForGroup(groupIndex) {
+  async function createBcfForGroup(groupIndex, triggerButton) {
     if (!state.validation || !state.validation.groups[groupIndex]) {
+      setRunStatus(
+        "Fant ikke avviksgruppen for valgt BCF-knapp.",
+        "state-error",
+      );
       return;
     }
 
@@ -3560,6 +3564,9 @@
     }
 
     var group = state.validation.groups[groupIndex];
+    setRunStatus('Oppretter BCF for gruppen "' + group.title + '"...', "");
+    setTransientButtonState(triggerButton, "Oppretter...", true, "btn-working");
+
     try {
       await createBcfIssue(group);
       setRunStatus(
@@ -3570,11 +3577,18 @@
           ".",
         "state-ok",
       );
+      setTransientButtonState(
+        triggerButton,
+        "BCF opprettet",
+        true,
+        "btn-success",
+      );
     } catch (error) {
       setRunStatus(
         "Kunne ikke opprette BCF: " + getErrorMessage(error),
         "state-error",
       );
+      setTransientButtonState(triggerButton, "Opprett BCF", false, "");
     }
   }
 
@@ -3590,6 +3604,10 @@
     }
 
     var created = 0;
+    setRunStatus(
+      "Oppretter BCF for " + state.validation.groups.length + " grupper...",
+      "",
+    );
     for (var i = 0; i < state.validation.groups.length; i += 1) {
       try {
         await createBcfIssue(state.validation.groups[i]);
@@ -3615,11 +3633,17 @@
     var payload = buildBcfPayload(group);
 
     if (methodName) {
-      return invokeMethodGuessing(api, methodName, [
-        payload,
-        { issue: payload },
-        { topic: payload },
-      ]);
+      try {
+        return await invokeMethodGuessing(api, methodName, [
+          payload,
+          { issue: payload },
+          { topic: payload },
+        ]);
+      } catch (error) {
+        if (!supportsRawTopicCreation(api)) {
+          throw error;
+        }
+      }
     }
 
     if (supportsRawTopicCreation(api)) {
@@ -3694,7 +3718,7 @@
           title: payload.title,
           "due-date": null,
           starred: false,
-          "is-draft": true,
+          "is-draft": false,
         },
         relationships: {
           "checklist-item-instance": {
@@ -3888,6 +3912,31 @@
         button.disabled = !supported;
         button.title = title;
       });
+  }
+
+  function setTransientButtonState(button, label, disabled, extraClassName) {
+    if (!button) {
+      return;
+    }
+
+    if (!button.dataset.defaultLabel) {
+      button.dataset.defaultLabel = button.textContent;
+    }
+
+    button.textContent = label || button.dataset.defaultLabel;
+    button.disabled = !!disabled;
+    button.classList.remove("btn-working", "btn-success");
+    if (extraClassName) {
+      button.classList.add(extraClassName);
+    }
+
+    if (extraClassName === "btn-success") {
+      window.setTimeout(function () {
+        button.textContent = button.dataset.defaultLabel || "Opprett BCF";
+        button.disabled = false;
+        button.classList.remove("btn-working", "btn-success");
+      }, 1800);
+    }
   }
 
   function setRunStatus(message, className) {
