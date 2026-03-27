@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-debug-2";
+  var BUILD_ID = "2026-03-27-debug-3";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -954,7 +954,76 @@
       } catch (error) {}
     }
 
+    if (guid) {
+      var resolved = await resolveObjectCandidateByGuid(api, guid);
+      if (resolved) {
+        var resolvedId = pickFirst(resolved || {}, [
+          "id",
+          "objectId",
+          "dbId",
+          "expressId",
+        ]);
+        var resolvedGuid = pickFirst(resolved || {}, [
+          "guid",
+          "globalId",
+          "ifcGuid",
+          "GlobalId",
+        ]);
+        var resolvedCandidates = [];
+
+        if (resolvedId) {
+          resolvedCandidates.push(resolvedId);
+        }
+        if (resolvedGuid && resolvedGuid !== resolvedId) {
+          resolvedCandidates.push(resolvedGuid);
+        }
+        resolvedCandidates.push(resolved);
+
+        for (var j = 0; j < resolvedCandidates.length; j += 1) {
+          try {
+            var resolvedDetail = await api.getObjectInfo(resolvedCandidates[j]);
+            return mergeObjectPayloads(resolved, resolvedDetail);
+          } catch (error) {}
+        }
+      }
+    }
+
     return object;
+  }
+
+  async function resolveObjectCandidateByGuid(api, guid) {
+    if (!api || typeof api.findObjects !== "function" || !guid) {
+      return null;
+    }
+
+    try {
+      var response = await invokeMethodGuessing(api, "findObjects", [
+        {
+          key: "GlobalId",
+          value: guid,
+          page: { limit: 1, skip: 0 },
+        },
+        {
+          key: "GUID",
+          value: guid,
+          page: { limit: 1, skip: 0 },
+        },
+        {
+          filter: { key: "GlobalId", value: guid },
+          page: { limit: 1, skip: 0 },
+        },
+        {
+          filter: { key: "GUID", value: guid },
+          page: { limit: 1, skip: 0 },
+        },
+      ]);
+      var candidates = extractObjectsFromResponse(response);
+      if (candidates.length) {
+        return candidates[0];
+      }
+    } catch (error) {}
+
+    return null;
   }
 
   function mergeObjectPayloads(baseObject, detailObject) {
