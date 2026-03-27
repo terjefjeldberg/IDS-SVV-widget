@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-debug-5";
+  var BUILD_ID = "2026-03-27-search-union-1";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -1143,7 +1143,11 @@
   }
 
   async function hydrateObjects(api, objects) {
-    if (!api || typeof api.getObjectInfo !== "function") {
+    if (
+      !api ||
+      (typeof api.getObjectInfo !== "function" &&
+        typeof api.getObjectInfoForSearch !== "function")
+    ) {
       return objects;
     }
 
@@ -1155,7 +1159,49 @@
     return hydrated;
   }
 
+  async function bestEffortGetObjectInfoForSearch(api, object) {
+    if (!api || typeof api.getObjectInfoForSearch !== "function") {
+      return null;
+    }
+
+    var guid = pickFirst(object || {}, [
+      "guid",
+      "globalId",
+      "ifcGuid",
+      "GlobalId",
+    ]);
+    var id = pickFirst(object || {}, ["id", "objectId", "dbId", "expressId"]);
+    var buildingId = await resolveSearchBuildingId(api, object);
+    var queries = buildObjectInfoForSearchQueries(buildingId, guid, id);
+
+    for (var i = 0; i < queries.length; i += 1) {
+      try {
+        var response = await api.getObjectInfoForSearch(queries[i]);
+        var matched = selectBestMatchingObjectFromResponse(
+          response,
+          guid,
+          id,
+          object,
+        );
+        if (matched) {
+          return matched;
+        }
+      } catch (error) {}
+    }
+
+    return null;
+  }
+
   async function bestEffortGetObjectInfo(api, object) {
+    var searchedDetail = await bestEffortGetObjectInfoForSearch(api, object);
+    if (searchedDetail) {
+      var searchedMerged = mergeObjectPayloads(object, searchedDetail);
+      if (Object.keys(extractPropertySets(searchedMerged)).length) {
+        return searchedMerged;
+      }
+      object = searchedMerged;
+    }
+
     var candidates = [];
     var guid = pickFirst(object || {}, [
       "guid",
@@ -1175,7 +1221,12 @@
 
     for (var i = 0; i < candidates.length; i += 1) {
       try {
-        var detail = await api.getObjectInfo(candidates[i]);
+        if (typeof api.getObjectInfo !== "function") {
+          break;
+        }
+        var detail = normalizeObjectPayload(
+          await api.getObjectInfo(candidates[i]),
+        );
         return await hydrateObjectPropertiesIfNeeded(api, object, detail);
       } catch (error) {}
     }
@@ -1207,7 +1258,12 @@
 
         for (var j = 0; j < resolvedCandidates.length; j += 1) {
           try {
-            var resolvedDetail = await api.getObjectInfo(resolvedCandidates[j]);
+            if (typeof api.getObjectInfo !== "function") {
+              break;
+            }
+            var resolvedDetail = normalizeObjectPayload(
+              await api.getObjectInfo(resolvedCandidates[j]),
+            );
             return await hydrateObjectPropertiesIfNeeded(
               api,
               mergeObjectPayloads(object, resolved),
@@ -1226,7 +1282,10 @@
     baseObject,
     detailObject,
   ) {
-    var merged = mergeObjectPayloads(baseObject, detailObject);
+    var merged = mergeObjectPayloads(
+      normalizeObjectPayload(baseObject),
+      normalizeObjectPayload(detailObject),
+    );
     if (Object.keys(extractPropertySets(merged)).length) {
       return merged;
     }
@@ -1429,13 +1488,68 @@
     );
   }
 
+  function normalizeIdentityToken(value) {
+    return String(value || "")
+      .trim()
+      .replace(/^T~/, "");
+  }
+
+  function normalizeObjectPayload(source) {
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      return source;
+    }
+
+    var normalized = source;
+
+    if (
+      normalized.data &&
+      typeof normalized.data === "object" &&
+      !Array.isArray(normalized.data)
+    ) {
+      normalized = Object.assign({}, normalized.data, {
+        _jsonApiDocument: source,
+      });
+    }
+
+    if (normalized.attributes && typeof normalized.attributes === "object") {
+      normalized = Object.assign({}, normalized.attributes, normalized);
+    }
+
+    if (!normalized.properties && normalized.attributes) {
+      normalized.properties = normalized.attributes.properties || {};
+    }
+
+    if (!normalized.guid) {
+      normalized.guid =
+        pickFirst(normalized, ["globalId", "ifcGuid", "GlobalId"]) ||
+        pickFirst(normalized.properties || {}, [
+          "Global Id",
+          "GlobalId",
+          "GUID",
+          "guid",
+        ]) ||
+        "";
+    }
+
+    if (!normalized.name) {
+      normalized.name = pickFirst(normalized, [
+        "label",
+        "title",
+        "displayName",
+        "Name",
+      ]);
+    }
+
+    return normalized;
+  }
+
   function extractObjectsFromResponse(response) {
     if (!response) {
       return [];
     }
 
     if (Array.isArray(response)) {
-      return response;
+      return response.map(normalizeObjectPayload);
     }
 
     var candidates = [
@@ -1450,8 +1564,15 @@
 
     for (var i = 0; i < candidates.length; i += 1) {
       if (Array.isArray(candidates[i])) {
-        return candidates[i];
+        return candidates[i].map(normalizeObjectPayload);
       }
+      if (candidates[i] && typeof candidates[i] === "object") {
+        return [normalizeObjectPayload(candidates[i])];
+      }
+    }
+
+    if (response && typeof response === "object") {
+      return [normalizeObjectPayload(response)];
     }
 
     return [];
@@ -1912,8 +2033,23 @@
     }
 
     var containers = [
+      {
+        value: source.attributes && source.attributes.propertySets,
+        fallbackSetName: "",
+        allowFlatMap: false,
+      },
+      {
+        value: source.attributes && source.attributes.psets,
+        fallbackSetName: "",
+        allowFlatMap: false,
+      },
       { value: source.propertySets, fallbackSetName: "", allowFlatMap: false },
       { value: source.psets, fallbackSetName: "", allowFlatMap: false },
+      {
+        value: source.attributes && source.attributes.properties,
+        fallbackSetName: "__flat__",
+        allowFlatMap: true,
+      },
       {
         value: source.properties,
         fallbackSetName: "__flat__",
@@ -1939,6 +2075,133 @@
     }
 
     return normalizePropertyContainer(source, "__flat__", true);
+  }
+
+  async function resolveSearchBuildingId(api, object) {
+    var directBuildingId = stringifyValue(
+      firstNonEmpty([
+        pickFirst(object || {}, ["buildingId", "@Building Id"]),
+        state.streamBim && state.streamBim.searchBuildingId,
+      ]),
+    ).trim();
+
+    if (directBuildingId) {
+      if (state.streamBim) {
+        state.streamBim.searchBuildingId = directBuildingId;
+      }
+      return directBuildingId;
+    }
+
+    try {
+      var buildingId = stringifyValue(await api.getBuildingId()).trim();
+      if (buildingId) {
+        state.streamBim.searchBuildingId = buildingId;
+        return buildingId;
+      }
+    } catch (error) {}
+
+    state.streamBim.searchBuildingId = "1000";
+    return "1000";
+  }
+
+  function buildObjectInfoForSearchQueries(buildingId, guid, id) {
+    var values = uniqueStrings([guid, id].filter(Boolean));
+    var keys = ["GUID", "GlobalId", "Global Id", "ifcGuid"];
+    var queries = [];
+
+    values.forEach(function (value) {
+      keys.forEach(function (key) {
+        queries.push({
+          filter: { key: key, value: value },
+          page: { limit: 1, skip: 0 },
+          fieldUnion: true,
+        });
+        queries.push({
+          filter: {
+            rules: [
+              [
+                compactObject({
+                  buildingId: buildingId,
+                  propKey: key,
+                  propType: "str",
+                  propValue: value,
+                }),
+              ],
+            ],
+          },
+          page: { limit: 1, skip: 0 },
+          fieldUnion: true,
+        });
+        queries.push({
+          filter: {
+            rules: [
+              [
+                compactObject({
+                  buildingId: buildingId,
+                  psetName: "",
+                  propKey: key,
+                  propType: "str",
+                  propValue: value,
+                }),
+              ],
+            ],
+          },
+          page: { limit: 1, skip: 0 },
+          fieldUnion: true,
+        });
+      });
+    });
+
+    var seen = {};
+    return queries.filter(function (query) {
+      var signature = JSON.stringify(query);
+      if (seen[signature]) {
+        return false;
+      }
+      seen[signature] = true;
+      return true;
+    });
+  }
+
+  function selectBestMatchingObjectFromResponse(response, guid, id, fallback) {
+    var objects = extractObjectsFromResponse(response);
+    if (!objects.length) {
+      return null;
+    }
+
+    var wanted = uniqueStrings(
+      [guid, id, buildObjectIdentity(fallback)].filter(Boolean),
+    )
+      .map(normalizeIdentityToken)
+      .filter(Boolean);
+
+    if (!wanted.length) {
+      return objects[0];
+    }
+
+    for (var i = 0; i < objects.length; i += 1) {
+      var candidateTokens = uniqueStrings([
+        buildObjectIdentity(objects[i]),
+        pickFirst(objects[i], ["id", "objectId", "dbId", "expressId"]),
+        pickFirst(objects[i], ["guid", "globalId", "ifcGuid", "GlobalId"]),
+        pickFirst(objects[i].properties || {}, [
+          "Global Id",
+          "GlobalId",
+          "GUID",
+          "guid",
+        ]),
+      ])
+        .map(normalizeIdentityToken)
+        .filter(Boolean);
+
+      for (var j = 0; j < candidateTokens.length; j += 1) {
+        if (wanted.indexOf(candidateTokens[j]) !== -1) {
+          return objects[i];
+        }
+      }
+    }
+
+    return objects[0];
   }
 
   function normalizePropertyContainer(
