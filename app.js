@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-search-union-1";
+  var BUILD_ID = "2026-03-27-groups-1";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -2032,6 +2032,16 @@
       return {};
     }
 
+    var groupedPropertySets = mergePropertySets(
+      extractPropertySetsFromGroups(
+        source.attributes && source.attributes.groups,
+      ),
+      extractPropertySetsFromGroups(source.groups),
+    );
+    if (Object.keys(groupedPropertySets).length) {
+      return groupedPropertySets;
+    }
+
     var containers = [
       {
         value: source.attributes && source.attributes.propertySets,
@@ -2075,6 +2085,98 @@
     }
 
     return normalizePropertyContainer(source, "__flat__", true);
+  }
+
+  function extractPropertySetsFromGroups(groups) {
+    if (!Array.isArray(groups) || !groups.length) {
+      return {};
+    }
+
+    var propertySets = {};
+
+    groups.forEach(function (group) {
+      if (!group || typeof group !== "object") {
+        return;
+      }
+
+      var setName =
+        group.label ||
+        group.name ||
+        group.title ||
+        group.propertySet ||
+        group.propertySetName ||
+        "Default";
+      var content = group.content || group.data || group.attributes || {};
+      var groupProperties = null;
+
+      if (Array.isArray(content.properties)) {
+        groupProperties = content.properties;
+      } else if (Array.isArray(content.values)) {
+        groupProperties = content.values;
+      } else if (Array.isArray(group.properties)) {
+        groupProperties = group.properties;
+      } else if (Array.isArray(group.values)) {
+        groupProperties = group.values;
+      } else if (content.properties && typeof content.properties === "object") {
+        groupProperties = content.properties;
+      } else if (group.properties && typeof group.properties === "object") {
+        groupProperties = group.properties;
+      }
+
+      var normalized = normalizeGroupProperties(groupProperties, setName);
+      if (Object.keys(normalized).length) {
+        propertySets = mergePropertySets(propertySets, normalized);
+      }
+    });
+
+    return propertySets;
+  }
+
+  function normalizeGroupProperties(groupProperties, setName) {
+    if (!groupProperties) {
+      return {};
+    }
+
+    if (Array.isArray(groupProperties)) {
+      var values = {};
+
+      groupProperties.forEach(function (item) {
+        if (!item || typeof item !== "object") {
+          return;
+        }
+
+        var key =
+          item.key || item.name || item.baseName || item.label || item.title;
+        if (!key) {
+          return;
+        }
+
+        values[key] = stringifyValue(
+          firstDefined([
+            item.value,
+            item.nominalValue,
+            item.displayValue,
+            item.Value,
+          ]),
+        );
+      });
+
+      if (!Object.keys(values).length) {
+        return {};
+      }
+
+      var result = {};
+      result[setName || "Default"] = values;
+      return result;
+    }
+
+    if (typeof groupProperties === "object") {
+      var objectResult = {};
+      objectResult[setName || "Default"] = flattenPropertyMap(groupProperties);
+      return objectResult;
+    }
+
+    return {};
   }
 
   async function resolveSearchBuildingId(api, object) {
