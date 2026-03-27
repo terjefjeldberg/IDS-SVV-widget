@@ -346,6 +346,18 @@ input {
     background: rgba(31, 138, 85, 0.14);
 }
 
+.status-neutral {
+    color: #41556d;
+    background: rgba(65, 85, 109, 0.14);
+}
+
+.debug-subline {
+    margin-top: 4px;
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-family: "IBM Plex Mono", monospace;
+}
+
 .group-list,
 .method-list {
     display: grid;

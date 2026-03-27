@@ -3,7 +3,9 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-results-1";
+  var BUILD_ID = "2026-03-27-debug-1";
+  var DEBUG_PROPERTY_SET = "Trekkekum_853";
+  var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
   var state = {
     streamBim: {
@@ -44,6 +46,7 @@
     els.metricGroups = byId("metric-groups");
     els.runStatus = byId("run-status");
     els.resultTableRoot = byId("result-table-root");
+    els.propertyDebugRoot = byId("property-debug-root");
     els.groupsRoot = byId("groups-root");
   }
 
@@ -201,6 +204,7 @@
       state.validation = report;
       renderSummary(report);
       renderResultTable(report);
+      renderPropertyDebug(specs, modelData.objects);
       renderGroups(report);
 
       if (!report.summary.applicableObjectCount) {
@@ -241,6 +245,7 @@
       state.validation = null;
       renderSummary(null);
       renderResultTable(null);
+      renderPropertyDebug(null, null);
       renderGroups(null);
       setRunStatus(getErrorMessage(error), "state-error");
     } finally {
@@ -2483,6 +2488,171 @@
         "</tbody>",
       "</table>",
     ].join("");
+  }
+
+  function renderPropertyDebug(specs, objects) {
+    if (!els.propertyDebugRoot) {
+      return;
+    }
+
+    if (!specs || !objects) {
+      els.propertyDebugRoot.className = "result-table-wrap empty-state";
+      els.propertyDebugRoot.textContent =
+        "Midlertidig debug for Trekkekum_853.AntallRor_10840 vises etter kjoring.";
+      return;
+    }
+
+    var debugRows = buildPropertyDebugRows(specs, objects);
+    if (!debugRows.length) {
+      els.propertyDebugRoot.className = "result-table-wrap empty-state";
+      els.propertyDebugRoot.textContent =
+        "Fant ingen relevante objekter eller regler for Trekkekum_853.AntallRor_10840.";
+      return;
+    }
+
+    els.propertyDebugRoot.className = "result-table-wrap";
+    els.propertyDebugRoot.innerHTML = [
+      '<div class="result-table-head">Debug: Trekkekum_853.AntallRor_10840</div>',
+      '<table class="result-table result-table-debug">',
+      "  <thead>",
+      "    <tr>",
+      "      <th>Objekt</th>",
+      "      <th>Spesifikasjon</th>",
+      "      <th>Vurderes</th>",
+      "      <th>Verdi lest</th>",
+      "      <th>Resultat</th>",
+      "    </tr>",
+      "  </thead>",
+      "  <tbody>" +
+        debugRows
+          .map(function (row) {
+            return [
+              "<tr>",
+              "  <td>" +
+                escapeHtml(row.objectLabel) +
+                '<div class="debug-subline">' +
+                escapeHtml(row.objectId) +
+                "</div></td>",
+              "  <td>" + escapeHtml(row.specName) + "</td>",
+              '  <td><span class="status-pill ' +
+                row.applicability.className +
+                '">' +
+                escapeHtml(row.applicability.label) +
+                "</span></td>",
+              "  <td>" + escapeHtml(row.actualValue) + "</td>",
+              '  <td><span class="status-pill ' +
+                row.outcome.className +
+                '">' +
+                escapeHtml(row.outcome.label) +
+                "</span></td>",
+              "</tr>",
+            ].join("");
+          })
+          .join("") +
+        "</tbody>",
+      "</table>",
+    ].join("");
+  }
+
+  function buildPropertyDebugRows(specs, objects) {
+    var relevantSpecs = coerceArray(specs).filter(function (spec) {
+      return coerceArray(spec.requirements).some(function (rule) {
+        return isDebugPropertyRule(rule);
+      });
+    });
+
+    var rows = [];
+    coerceArray(objects).forEach(function (object) {
+      relevantSpecs.forEach(function (spec) {
+        var rule = findDebugPropertyRule(spec);
+        if (!rule) {
+          return;
+        }
+
+        var isApplicable =
+          matchesSpecApplicabilityLocally(object, spec) ||
+          matchesApplicabilityHint(object, spec);
+        var actual = getPropertyValue(object, rule.propertySet, rule.baseName);
+        var hasValue = hasReadableValue(actual);
+
+        if (!isApplicable && !hasValue) {
+          return;
+        }
+
+        var evaluation = isApplicable
+          ? evaluateRule(actual, rule)
+          : { ok: true, ignored: true, reasonCode: "outside-spec" };
+
+        rows.push({
+          objectLabel: object.name || object.type || "Ukjent objekt",
+          objectId: object.guid || object.id || "-",
+          specName: spec.name || "Ukjent spesifikasjon",
+          actualValue: hasValue ? stringifyValue(actual) : "[mangler]",
+          applicability: isApplicable
+            ? { label: "Ja", className: "status-success" }
+            : { label: "Nei", className: "status-neutral" },
+          outcome: describeDebugOutcome(evaluation, isApplicable),
+        });
+      });
+    });
+
+    return rows.sort(function (a, b) {
+      return (
+        debugOutcomeRank(a.outcome.label) - debugOutcomeRank(b.outcome.label)
+      );
+    });
+  }
+
+  function findDebugPropertyRule(spec) {
+    var requirements = coerceArray(spec && spec.requirements);
+    for (var i = 0; i < requirements.length; i += 1) {
+      if (isDebugPropertyRule(requirements[i])) {
+        return requirements[i];
+      }
+    }
+    return null;
+  }
+
+  function isDebugPropertyRule(rule) {
+    return (
+      rule &&
+      keysLooselyMatch(rule.propertySet, DEBUG_PROPERTY_SET) &&
+      keysLooselyMatch(rule.baseName, DEBUG_PROPERTY_NAME)
+    );
+  }
+
+  function hasReadableValue(value) {
+    return (
+      value !== null &&
+      typeof value !== "undefined" &&
+      String(value).trim() !== ""
+    );
+  }
+
+  function describeDebugOutcome(evaluation, isApplicable) {
+    if (!isApplicable) {
+      return { label: "Ikke i spesifikasjon", className: "status-neutral" };
+    }
+    if (!evaluation.ok) {
+      return { label: "Verdiavvik", className: "status-fail" };
+    }
+    if (evaluation.ignored) {
+      return { label: "Property mangler", className: "status-partial" };
+    }
+    return { label: "OK", className: "status-success" };
+  }
+
+  function debugOutcomeRank(label) {
+    if (label === "Verdiavvik") {
+      return 0;
+    }
+    if (label === "Property mangler") {
+      return 1;
+    }
+    if (label === "Ikke i spesifikasjon") {
+      return 2;
+    }
+    return 3;
   }
 
   function determineSpecStatus(specStatus) {
