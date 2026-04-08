@@ -366,6 +366,47 @@ input {
     gap: 14px;
 }
 
+.groups-summary {
+    border: 1px solid var(--line);
+    background: #101a29;
+    border-radius: var(--radius-lg);
+    padding: 12px;
+}
+
+.groups-summary-title {
+    margin: 0 0 10px;
+    font-size: 0.82rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--brand);
+    font-weight: 800;
+}
+
+.groups-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+}
+
+.groups-summary-item {
+    border: 1px solid var(--line);
+    background: #131f30;
+    border-radius: var(--radius-md);
+    padding: 8px 10px;
+}
+
+.groups-summary-item span {
+    display: block;
+    font-size: 0.76rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+
+.groups-summary-item strong {
+    color: var(--ink);
+    font-size: 1.05rem;
+}
+
 .scope-section {
     border: 1px solid var(--line);
     background: #131e2d;
@@ -461,6 +502,68 @@ input {
 
 .object-list li {
     line-height: 1.45;
+}
+
+.object-item {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: #0f1928;
+    padding: 10px;
+    margin-left: 0;
+    list-style-position: inside;
+}
+
+.object-main {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: baseline;
+}
+
+.object-type {
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+
+.object-id {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-family: "IBM Plex Mono", monospace;
+    overflow-wrap: anywhere;
+}
+
+.object-values {
+    margin-top: 8px;
+    display: grid;
+    gap: 6px;
+}
+
+.object-value-row {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+}
+
+.object-label {
+    color: var(--muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.object-value-code {
+    display: block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.8rem;
+    color: #d7e3f8;
+    background: #0a1220;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 8px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
 }
 
 .object-actions {

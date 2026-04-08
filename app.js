@@ -302,25 +302,12 @@
           " Sjekk at utvalget i IDS-en bruker property-navn og verdier som faktisk finnes i StreamBIM.";
         setRunStatus(noMatchMessage, "state-warn");
       } else {
-        if (report.groups.length) {
-          setRunStatus(
-            "Validering ferdig. " +
-              report.summary.scopeCount +
-              " modellag sjekket, " +
-              report.groups.length +
-              " feilgrupper med " +
-              report.summary.failedChecks +
-              " verdiavvik.",
-            "state-warn",
-          );
-        } else {
-          setRunStatus(
-            "Validering ferdig. " +
-              report.summary.scopeCount +
-              " modellag sjekket. Ingen verdiavvik funnet.",
-            "state-ok",
-          );
-        }
+        setRunStatus(
+          report.groups.length
+            ? "Validering ferdig. Se detaljer under Avvik."
+            : "Validering ferdig. Ingen verdiavvik funnet.",
+          report.groups.length ? "state-warn" : "state-ok",
+        );
       }
     } catch (error) {
       state.validation = null;
@@ -3557,8 +3544,10 @@
     }
 
     els.groupsRoot.className = "group-list";
-    els.groupsRoot.innerHTML = report.scopes
-      .map(function (scope) {
+    els.groupsRoot.innerHTML =
+      renderGroupsSummary(report) +
+      report.scopes
+        .map(function (scope) {
         return [
           '<section class="scope-section">',
           '  <div class="scope-head">',
@@ -3615,19 +3604,34 @@
                         group.objects
                           .map(function (object) {
                             var objectId = resolveObjectIdentifier(object);
+                            var objectName = object.name || "Ukjent objekt";
+                            var objectType = object.type || "Ukjent type";
+                            var expectedValue = stringifyValue(
+                              object.expectedValue || "[ikke angitt]",
+                            );
+                            var actualValue = stringifyValue(
+                              object.actualValue || "[mangler]",
+                            );
                             return (
-                              "<li><strong>" +
-                              escapeHtml(object.name) +
-                              "</strong> (" +
-                              escapeHtml(object.type) +
-                              ")" +
+                              '<li class="object-item">' +
+                              '<div class="object-main"><strong>' +
+                              escapeHtml(objectName) +
+                              '</strong><span class="object-type">' +
+                              escapeHtml(objectType) +
+                              "</span></div>" +
                               (object.guid
-                                ? " GUID: " + escapeHtml(object.guid)
+                                ? '<div class="object-id">GUID: ' +
+                                  escapeHtml(object.guid) +
+                                  "</div>"
                                 : "") +
-                              "<br />Forventet: " +
-                              escapeHtml(object.expectedValue) +
-                              " | Faktisk: " +
-                              escapeHtml(object.actualValue || "[mangler]") +
+                              '<div class="object-values">' +
+                              '<div class="object-value-row"><span class="object-label">Tillatt:</span><code class="object-value-code">' +
+                              escapeHtml(expectedValue) +
+                              "</code></div>" +
+                              '<div class="object-value-row"><span class="object-label">Faktisk:</span><code class="object-value-code">' +
+                              escapeHtml(actualValue) +
+                              "</code></div>" +
+                              "</div>" +
                               (objectId
                                 ? '<div class="object-actions"><button class="btn btn-secondary btn-inline" type="button" data-action="goto-object" data-object-id="' +
                                   escapeHtml(objectId) +
@@ -3661,6 +3665,31 @@
       });
 
     updateBcfUi();
+  }
+
+  function renderGroupsSummary(report) {
+    return [
+      '<section class="groups-summary">',
+      '  <div class="groups-summary-title">Siste kjÃ¸ring</div>',
+      '  <div class="groups-summary-grid">',
+      '    <article class="groups-summary-item"><span>Modellag sjekket</span><strong>' +
+        String((report.summary && report.summary.scopeCount) || 0) +
+        "</strong></article>",
+      '    <article class="groups-summary-item"><span>Objekter sjekket</span><strong>' +
+        String((report.summary && report.summary.objectCountUnique) || 0) +
+        "</strong></article>",
+      '    <article class="groups-summary-item"><span>Objekter vurdert mot IDS</span><strong>' +
+        String((report.summary && report.summary.applicableObjectCount) || 0) +
+        "</strong></article>",
+      '    <article class="groups-summary-item"><span>Feilgrupper</span><strong>' +
+        String((report.groups && report.groups.length) || 0) +
+        "</strong></article>",
+      '    <article class="groups-summary-item"><span>Verdiavvik</span><strong>' +
+        String((report.summary && report.summary.failedChecks) || 0) +
+        "</strong></article>",
+      "  </div>",
+      "</section>",
+    ].join("");
   }
 
   async function createBcfForGroup(groupIndex, triggerButton) {
