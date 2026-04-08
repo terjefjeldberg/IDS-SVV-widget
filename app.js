@@ -12,6 +12,7 @@
       connected: false,
       api: null,
       methods: [],
+      connectPromise: null,
       rawIfcExportVariant: "",
     },
     idsText: "",
@@ -76,12 +77,25 @@
   }
 
   function connectToStreamBim() {
+    if (state.streamBim.connected && state.streamBim.api) {
+      return Promise.resolve(true);
+    }
+    if (!window.StreamBIM || typeof window.StreamBIM.connect !== "function") {
+      state.streamBim.connected = false;
+      state.streamBim.api = null;
+      state.streamBim.methods = [];
+      renderApiMethods();
+      return Promise.resolve(false);
+    }
+    if (state.streamBim.connectPromise) {
+      return state.streamBim.connectPromise;
+    }
     setConnectionState(
       "Kobler til",
-      "Build " + BUILD_ID + " - venter på parent frame",
+      "Build " + BUILD_ID + " - venter p? parent frame",
       "",
     );
-    window.StreamBIM.connect({})
+    state.streamBim.connectPromise = window.StreamBIM.connect({})
       .then(function () {
         state.streamBim.connected = true;
         state.streamBim.api = window.StreamBIM;
@@ -92,6 +106,7 @@
           "Widgeten kan lese tilgjengelige parent-metoder",
           "state-ok",
         );
+        return true;
       })
       .catch(function (error) {
         state.streamBim.connected = false;
@@ -101,12 +116,17 @@
         setConnectionState(
           "Ikke tilkoblet",
           getErrorMessage(error) ||
-            "Kjør widgeten inne i StreamBIM for å hente modell-data",
+            "Kj?r widgeten inne i StreamBIM for ? hente modell-data",
           "state-error",
         );
+        return false;
+      })
+      .then(function (connected) {
+        state.streamBim.connectPromise = null;
+        return connected;
       });
+    return state.streamBim.connectPromise;
   }
-
   function setConnectionState(title, detail, className) {
     if (els.connectionStatus) {
       els.connectionStatus.textContent = title;
@@ -201,11 +221,14 @@
       return;
     }
     if (!state.streamBim.connected || !state.streamBim.api) {
-      setRunStatus(
-        "Widgeten er ikke koblet til StreamBIM. Kjør den inne i StreamBIM for å hente IFC-data.",
-        "state-error",
-      );
-      return;
+      var connected = await connectToStreamBim();
+      if (!connected || !state.streamBim.connected || !state.streamBim.api) {
+        setRunStatus(
+          "Widgeten er ikke koblet til StreamBIM. Kj?r den inne i StreamBIM for ? hente IFC-data.",
+          "state-error",
+        );
+        return;
+      }
     }
 
     toggleBusy(true);
