@@ -52,7 +52,7 @@
 
   function renderBuildInfo() {
     els.connectionDetail.textContent =
-      "Build " + BUILD_ID + " - venter pa parent frame";
+      "Build " + BUILD_ID + " - venter på parent frame";
     if (typeof console !== "undefined" && console.info) {
       console.info("[IDS SVV] Build", BUILD_ID);
     }
@@ -63,12 +63,18 @@
     els.loadSampleBtn.addEventListener("click", loadSampleIds);
     els.validateBtn.addEventListener("click", runValidation);
     els.createAllBcfBtn.addEventListener("click", createBcfForAllGroups);
+    if (els.groupsRoot) {
+      els.groupsRoot.addEventListener("click", onObjectActionClick);
+    }
+    if (els.propertyDebugRoot) {
+      els.propertyDebugRoot.addEventListener("click", onObjectActionClick);
+    }
   }
 
   function connectToStreamBim() {
     setConnectionState(
       "Kobler til",
-      "Build " + BUILD_ID + " - venter pa parent frame",
+      "Build " + BUILD_ID + " - venter på parent frame",
       "",
     );
     window.StreamBIM.connect({})
@@ -91,7 +97,7 @@
         setConnectionState(
           "Ikke tilkoblet",
           getErrorMessage(error) ||
-            "Kjor widgeten inne i StreamBIM for a hente modell-data",
+            "Kjør widgeten inne i StreamBIM for å hente modell-data",
           "state-error",
         );
       });
@@ -111,11 +117,11 @@
     if (!methods.length) {
       if (els.apiHint) {
         els.apiHint.textContent =
-          "BCF-stotte kan ikke vurderes for tilkoblingen er etablert.";
+          "BCF-støtte kan ikke vurderes før tilkoblingen er etablert.";
       }
       if (els.apiMethods) {
         els.apiMethods.className = "method-list empty-state";
-        els.apiMethods.textContent = "Ingen metoder oppdaget enna.";
+        els.apiMethods.textContent = "Ingen metoder oppdaget ennå.";
       }
       updateBcfUi();
       return;
@@ -183,12 +189,12 @@
 
   async function runValidation() {
     if (!state.idsText) {
-      setRunStatus("Velg eller last inn en IDS-fil forst.", "state-warn");
+      setRunStatus("Velg eller last inn en IDS-fil først.", "state-warn");
       return;
     }
     if (!state.streamBim.connected || !state.streamBim.api) {
       setRunStatus(
-        "Widgeten er ikke koblet til StreamBIM. Kjor den inne i StreamBIM for a hente IFC-data.",
+        "Widgeten er ikke koblet til StreamBIM. Kjør den inne i StreamBIM for å hente IFC-data.",
         "state-error",
       );
       return;
@@ -682,7 +688,7 @@
       throw new Error(
         "Build " +
           BUILD_ID +
-          ": Fant ingen StreamBIM-metode for a lese modellobjekter. Tilgjengelige metoder: " +
+          ": Fant ingen StreamBIM-metode for å lese modellobjekter. Tilgjengelige metoder: " +
           state.streamBim.methods.join(", "),
       );
     }
@@ -3216,14 +3222,14 @@
     if (!report || !coerceArray(report.specStatuses).length) {
       els.resultTableRoot.className = "result-table-wrap empty-state";
       els.resultTableRoot.textContent =
-        "Kjor en IDS-kontroll for a se status per spesifikasjon.";
+        "Kjør en IDS-kontroll for å se status per spesifikasjon.";
       return;
     }
 
     if (hasUnevaluatedSpecStatuses(report)) {
       els.resultTableRoot.className = "result-table-wrap empty-state";
       els.resultTableRoot.textContent =
-        "Status per spesifikasjon skjules sa lenge det finnes saker som ikke er vurdert.";
+        "Status per spesifikasjon skjules så lenge det finnes saker som ikke er vurdert.";
       return;
     }
 
@@ -3279,7 +3285,7 @@
     if (!specs || !objects) {
       els.propertyDebugRoot.className = "result-table-wrap empty-state";
       els.propertyDebugRoot.textContent =
-        "Midlertidig debug for Trekkekum_853.AntallRor_10840 vises etter kjoring.";
+        "Midlertidig debug for Trekkekum_853.AntallRor_10840 vises etter kjøring.";
       return;
     }
 
@@ -3302,6 +3308,7 @@
       "      <th>Vurderes</th>",
       "      <th>Verdi lest</th>",
       "      <th>Resultat</th>",
+      "      <th>Handling</th>",
       "    </tr>",
       "  </thead>",
       "  <tbody>" +
@@ -3326,6 +3333,15 @@
                 '">' +
                 escapeHtml(row.outcome.label) +
                 "</span></td>",
+              '  <td>' +
+                (row.objectIdForAction
+                  ? '<button class="btn btn-secondary btn-inline" type="button" data-action="goto-object" data-object-id="' +
+                    escapeHtml(row.objectIdForAction) +
+                    '" data-object-label="' +
+                    escapeHtml(row.objectLabel || row.objectIdForAction) +
+                    '">Gå til objekt</button>'
+                  : '<span class="status-note">-</span>') +
+                "</td>",
               "</tr>",
             ].join("");
           })
@@ -3371,6 +3387,7 @@
         rows.push({
           objectLabel: object.name || object.type || "Ukjent objekt",
           objectId: object.guid || object.id || "-",
+          objectIdForAction: resolveObjectIdentifier(object),
           specName: spec.name || "Ukjent spesifikasjon",
           actualValue: hasValue ? stringifyValue(actual) : "[mangler]",
           applicability: isApplicable
@@ -3466,7 +3483,7 @@
   function renderGroups(report) {
     if (!report || !report.scopes || !report.scopes.length) {
       els.groupsRoot.className = "group-list empty-state";
-      els.groupsRoot.textContent = "Ingen grupperte avvik a vise.";
+      els.groupsRoot.textContent = "Ingen grupperte avvik å vise.";
       return;
     }
 
@@ -3528,6 +3545,7 @@
                       '      <ol class="object-list">' +
                         group.objects
                           .map(function (object) {
+                            var objectId = resolveObjectIdentifier(object);
                             return (
                               "<li><strong>" +
                               escapeHtml(object.name) +
@@ -3540,7 +3558,14 @@
                               "<br />Forventet: " +
                               escapeHtml(object.expectedValue) +
                               " | Faktisk: " +
-                              escapeHtml(object.actualValue || "[mangler]")
+                              escapeHtml(object.actualValue || "[mangler]") +
+                              (objectId
+                                ? '<div class="object-actions"><button class="btn btn-secondary btn-inline" type="button" data-action="goto-object" data-object-id="' +
+                                  escapeHtml(objectId) +
+                                  '" data-object-label="' +
+                                  escapeHtml(object.name || object.type || objectId) +
+                                  '">Gå til objekt</button></div>'
+                                : "")
                             );
                           })
                           .join("</li>") +
@@ -3614,7 +3639,7 @@
 
   async function createBcfForAllGroups() {
     if (!state.validation || !state.validation.groups.length) {
-      setRunStatus("Ingen feilgrupper a opprette BCF fra.", "state-warn");
+      setRunStatus("Ingen feilgrupper å opprette BCF fra.", "state-warn");
       return;
     }
 
@@ -4370,11 +4395,81 @@
 
     if (extraClassName === "btn-success") {
       window.setTimeout(function () {
-        button.textContent = button.dataset.defaultLabel || "Opprett BCF";
+        button.textContent = button.dataset.defaultLabel || "Utført";
         button.disabled = false;
         button.classList.remove("btn-working", "btn-success");
       }, 1800);
     }
+  }
+
+  function onObjectActionClick(event) {
+    var target = event && event.target;
+    var button =
+      target && typeof target.closest === "function"
+        ? target.closest('[data-action="goto-object"]')
+        : null;
+    if (!button) {
+      return;
+    }
+    event.preventDefault();
+    goToObjectFromButton(button);
+  }
+
+  async function goToObjectFromButton(button) {
+    var objectId = button.getAttribute("data-object-id");
+    var objectLabel =
+      button.getAttribute("data-object-label") || objectId || "objekt";
+    var api = state.streamBim && state.streamBim.api;
+
+    if (!objectId) {
+      setRunStatus("Objekt-ID mangler for valgt rad.", "state-warn");
+      return;
+    }
+    if (!api) {
+      setRunStatus("Widgeten er ikke koblet til StreamBIM.", "state-warn");
+      return;
+    }
+    if (
+      typeof api.gotoObject !== "function" &&
+      typeof api.highlightObject !== "function"
+    ) {
+      setRunStatus(
+        "StreamBIM-API eksponerer ikke gotoObject/highlightObject.",
+        "state-error",
+      );
+      return;
+    }
+
+    setTransientButtonState(button, "Åpner...", true, "btn-working");
+    try {
+      if (typeof api.highlightObject === "function") {
+        await Promise.resolve(api.highlightObject(objectId));
+      }
+      if (typeof api.gotoObject === "function") {
+        await Promise.resolve(api.gotoObject(objectId));
+      }
+      setRunStatus('Åpnet objekt "' + objectLabel + '" i modellen.', "state-ok");
+      setTransientButtonState(button, "Åpnet", true, "btn-success");
+    } catch (error) {
+      setRunStatus(
+        "Kunne ikke åpne objekt: " + getErrorMessage(error),
+        "state-error",
+      );
+      setTransientButtonState(button, "Gå til objekt", false, "");
+    }
+  }
+
+  function resolveObjectIdentifier(object) {
+    return String(
+      firstNonEmpty([
+        object && object.guid,
+        object && object.objectGuid,
+        object && object.globalId,
+        object && object.ifcGuid,
+        object && object.id,
+        object && object.objectId,
+      ]) || "",
+    ).trim();
   }
 
   function setRunStatus(message, className) {
