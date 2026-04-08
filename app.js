@@ -13,6 +13,7 @@
       api: null,
       methods: [],
       connectPromise: null,
+      lastConnectError: "",
       rawIfcExportVariant: "",
     },
     idsText: "",
@@ -97,6 +98,7 @@
     );
     state.streamBim.connectPromise = window.StreamBIM.connect({})
       .then(function () {
+        state.streamBim.lastConnectError = "";
         state.streamBim.connected = true;
         state.streamBim.api = window.StreamBIM;
         state.streamBim.methods = listCallableMethods(window.StreamBIM);
@@ -109,6 +111,23 @@
         return true;
       })
       .catch(function (error) {
+        var fallbackApi = window.StreamBIM;
+        var fallbackMethods = listCallableMethods(fallbackApi);
+        if (hasUsableStreamBimApi(fallbackApi, fallbackMethods)) {
+          state.streamBim.lastConnectError = "";
+          state.streamBim.connected = true;
+          state.streamBim.api = fallbackApi;
+          state.streamBim.methods = fallbackMethods;
+          renderApiMethods();
+          setConnectionState(
+            "Tilkoblet",
+            "Bruker tilgjengelige StreamBIM-metoder uten ny handshake",
+            "state-ok",
+          );
+          return true;
+        }
+
+        state.streamBim.lastConnectError = getErrorMessage(error);
         state.streamBim.connected = false;
         state.streamBim.api = null;
         state.streamBim.methods = [];
@@ -135,6 +154,21 @@
     if (els.connectionDetail) {
       els.connectionDetail.textContent = detail;
     }
+  }
+
+  function hasUsableStreamBimApi(api, methods) {
+    var callable = methods || listCallableMethods(api);
+    var requiredAny = [
+      "makeApiRequest",
+      "findObjects",
+      "getObjects",
+      "getAllObjects",
+      "getFloors",
+      "getFloorObjects",
+    ];
+    return requiredAny.some(function (name) {
+      return callable.indexOf(name) >= 0;
+    });
   }
 
   function renderApiMethods() {
@@ -223,8 +257,12 @@
     if (!state.streamBim.connected || !state.streamBim.api) {
       var connected = await connectToStreamBim();
       if (!connected || !state.streamBim.connected || !state.streamBim.api) {
+        var connectDetails = state.streamBim.lastConnectError
+          ? " (" + state.streamBim.lastConnectError + ")"
+          : "";
         setRunStatus(
-          "Widgeten er ikke koblet til StreamBIM. Kj?r den inne i StreamBIM for ? hente IFC-data.",
+          "Widgeten er ikke koblet til StreamBIM. Kj?r den inne i StreamBIM for ? hente IFC-data." +
+            connectDetails,
           "state-error",
         );
         return;
