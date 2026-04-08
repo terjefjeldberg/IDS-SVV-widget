@@ -105,14 +105,18 @@
 
   function renderApiMethods() {
     var methods = state.streamBim.methods;
-    els.apiMethodCount.textContent = methods.length + " metoder";
+    if (els.apiMethodCount) {
+      els.apiMethodCount.textContent = methods.length + " metoder";
+    }
     if (!methods.length) {
       if (els.apiHint) {
         els.apiHint.textContent =
           "BCF-stotte kan ikke vurderes for tilkoblingen er etablert.";
       }
-      els.apiMethods.className = "method-list empty-state";
-      els.apiMethods.textContent = "Ingen metoder oppdaget enna.";
+      if (els.apiMethods) {
+        els.apiMethods.className = "method-list empty-state";
+        els.apiMethods.textContent = "Ingen metoder oppdaget enna.";
+      }
       updateBcfUi();
       return;
     }
@@ -123,12 +127,14 @@
         : "BCF-opprettelse er ikke eksponert i denne widget-instansen.";
     }
 
-    els.apiMethods.className = "method-list";
-    els.apiMethods.innerHTML = methods
-      .map(function (methodName) {
-        return '<div class="method-chip">' + escapeHtml(methodName) + "</div>";
-      })
-      .join("");
+    if (els.apiMethods) {
+      els.apiMethods.className = "method-list";
+      els.apiMethods.innerHTML = methods
+        .map(function (methodName) {
+          return '<div class="method-chip">' + escapeHtml(methodName) + "</div>";
+        })
+        .join("");
+    }
     updateBcfUi();
   }
 
@@ -3214,6 +3220,13 @@
       return;
     }
 
+    if (hasUnevaluatedSpecStatuses(report)) {
+      els.resultTableRoot.className = "result-table-wrap empty-state";
+      els.resultTableRoot.textContent =
+        "Status per spesifikasjon skjules sa lenge det finnes saker som ikke er vurdert.";
+      return;
+    }
+
     els.resultTableRoot.className = "result-table-wrap";
     els.resultTableRoot.innerHTML = [
       '<div class="result-table-head">Status per spesifikasjon</div>',
@@ -3249,6 +3262,13 @@
         "</tbody>",
       "</table>",
     ].join("");
+  }
+
+  function hasUnevaluatedSpecStatuses(report) {
+    return coerceArray(report && report.specStatuses).some(function (specStatus) {
+      var status = determineSpecStatus(specStatus);
+      return status && status.label === "Ikke vurdert";
+    });
   }
 
   function renderPropertyDebug(specs, objects) {
