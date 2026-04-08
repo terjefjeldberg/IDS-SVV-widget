@@ -393,16 +393,38 @@ input {
     background: #131f30;
     border-radius: var(--radius-md);
     padding: 8px 10px;
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
 }
 
-.groups-summary-item span {
+.groups-summary-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    border: 1px solid rgba(246, 163, 26, 0.3);
+    color: var(--brand);
+    font-size: 0.82rem;
+    line-height: 1;
+}
+
+.groups-summary-item-alert .groups-summary-icon {
+    border-color: rgba(255, 111, 111, 0.35);
+    color: #ff8f8f;
+}
+
+.groups-summary-label {
     display: block;
     font-size: 0.76rem;
     color: var(--muted);
     margin-bottom: 4px;
 }
 
-.groups-summary-item strong {
+.groups-summary-content strong {
     color: var(--ink);
     font-size: 1.05rem;
 }

@@ -3670,28 +3670,36 @@
   function renderGroupsSummary(report) {
     return [
       '<section class="groups-summary">',
-      '  <div class="groups-summary-title">Siste kjÃ¸ring</div>',
+      '  <div class="groups-summary-title">Siste kj&oslash;ring</div>',
       '  <div class="groups-summary-grid">',
-      '    <article class="groups-summary-item"><span>Modellag sjekket</span><strong>' +
+      '    <article class="groups-summary-item">' +
+        '      <span class="groups-summary-icon" aria-hidden="true">&#9776;</span>' +
+        '      <div class="groups-summary-content"><span class="groups-summary-label">Modellag sjekket</span><strong>' +
         String((report.summary && report.summary.scopeCount) || 0) +
-        "</strong></article>",
-      '    <article class="groups-summary-item"><span>Objekter sjekket</span><strong>' +
+        "</strong></div>" +
+        "</article>",
+      '    <article class="groups-summary-item">' +
+        '      <span class="groups-summary-icon" aria-hidden="true">&#9634;</span>' +
+        '      <div class="groups-summary-content"><span class="groups-summary-label">Objekter sjekket</span><strong>' +
         String((report.summary && report.summary.objectCountUnique) || 0) +
-        "</strong></article>",
-      '    <article class="groups-summary-item"><span>Objekter vurdert mot IDS</span><strong>' +
+        "</strong></div>" +
+        "</article>",
+      '    <article class="groups-summary-item">' +
+        '      <span class="groups-summary-icon" aria-hidden="true">&#10003;</span>' +
+        '      <div class="groups-summary-content"><span class="groups-summary-label">Objekter vurdert mot IDS</span><strong>' +
         String((report.summary && report.summary.applicableObjectCount) || 0) +
-        "</strong></article>",
-      '    <article class="groups-summary-item"><span>Feilgrupper</span><strong>' +
+        "</strong></div>" +
+        "</article>",
+      '    <article class="groups-summary-item groups-summary-item-alert">' +
+        '      <span class="groups-summary-icon" aria-hidden="true">&#10005;</span>' +
+        '      <div class="groups-summary-content"><span class="groups-summary-label">Feil funnet</span><strong>' +
         String((report.groups && report.groups.length) || 0) +
-        "</strong></article>",
-      '    <article class="groups-summary-item"><span>Verdiavvik</span><strong>' +
-        String((report.summary && report.summary.failedChecks) || 0) +
-        "</strong></article>",
+        "</strong></div>" +
+        "</article>",
       "  </div>",
       "</section>",
     ].join("");
   }
-
   async function createBcfForGroup(groupIndex, triggerButton) {
     if (!state.validation || !state.validation.groups[groupIndex]) {
       setRunStatus(
