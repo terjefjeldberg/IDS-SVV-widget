@@ -51,8 +51,10 @@
   }
 
   function renderBuildInfo() {
-    els.connectionDetail.textContent =
-      "Build " + BUILD_ID + " - venter på parent frame";
+    if (els.connectionDetail) {
+      els.connectionDetail.textContent =
+        "Build " + BUILD_ID + " - venter på parent frame";
+    }
     if (typeof console !== "undefined" && console.info) {
       console.info("[IDS SVV] Build", BUILD_ID);
     }
@@ -62,7 +64,9 @@
     els.idsFile.addEventListener("change", onIdsFileSelected);
     els.loadSampleBtn.addEventListener("click", loadSampleIds);
     els.validateBtn.addEventListener("click", runValidation);
-    els.createAllBcfBtn.addEventListener("click", createBcfForAllGroups);
+    if (els.createAllBcfBtn) {
+      els.createAllBcfBtn.addEventListener("click", createBcfForAllGroups);
+    }
     if (els.groupsRoot) {
       els.groupsRoot.addEventListener("click", onObjectActionClick);
     }
@@ -104,9 +108,13 @@
   }
 
   function setConnectionState(title, detail, className) {
-    els.connectionStatus.textContent = title;
-    els.connectionStatus.className = className || "";
-    els.connectionDetail.textContent = detail;
+    if (els.connectionStatus) {
+      els.connectionStatus.textContent = title;
+      els.connectionStatus.className = className || "";
+    }
+    if (els.connectionDetail) {
+      els.connectionDetail.textContent = detail;
+    }
   }
 
   function renderApiMethods() {
@@ -4479,7 +4487,9 @@
 
   function toggleBusy(isBusy) {
     els.validateBtn.disabled = isBusy;
-    els.createAllBcfBtn.disabled = isBusy;
+    if (els.createAllBcfBtn) {
+      els.createAllBcfBtn.disabled = isBusy;
+    }
     els.loadSampleBtn.disabled = isBusy;
   }
 
