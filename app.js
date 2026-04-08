@@ -3719,15 +3719,27 @@
     setTransientButtonState(triggerButton, "Oppretter...", true, "btn-working");
 
     try {
-      await createBcfIssue(group);
-      setRunStatus(
-        'BCF med capture opprettet for gruppen "' +
-          group.title +
-          '" i ' +
-          group.scopeLabel +
-          ".",
-        "state-ok",
-      );
+      var createResult = await createBcfIssue(group);
+      if (createResult && createResult.captureWarning) {
+        setRunStatus(
+          'BCF opprettet for gruppen "' +
+            group.title +
+            '" i ' +
+            group.scopeLabel +
+            ', men screenshot/capture mangler: ' +
+            createResult.captureWarning,
+          "state-warn",
+        );
+      } else {
+        setRunStatus(
+          'BCF med capture opprettet for gruppen "' +
+            group.title +
+            '" i ' +
+            group.scopeLabel +
+            ".",
+          "state-ok",
+        );
+      }
       setTransientButtonState(
         triggerButton,
         "BCF opprettet",
@@ -3755,13 +3767,17 @@
     }
 
     var created = 0;
+    var captureWarnings = 0;
     setRunStatus(
       "Oppretter BCF for " + state.validation.groups.length + " grupper...",
       "",
     );
     for (var i = 0; i < state.validation.groups.length; i += 1) {
       try {
-        await createBcfIssue(state.validation.groups[i]);
+        var bulkResult = await createBcfIssue(state.validation.groups[i]);
+        if (bulkResult && bulkResult.captureWarning) {
+          captureWarnings += 1;
+        }
         created += 1;
       } catch (error) {
         setRunStatus(
@@ -3775,10 +3791,21 @@
       }
     }
 
-    setRunStatus(
-      "BCF med capture opprettet for " + created + " grupper.",
-      "state-ok",
-    );
+    if (captureWarnings > 0) {
+      setRunStatus(
+        "BCF opprettet for " +
+          created +
+          " grupper, men " +
+          captureWarnings +
+          " mangler screenshot/capture.",
+        "state-warn",
+      );
+    } else {
+      setRunStatus(
+        "BCF med capture opprettet for " + created + " grupper.",
+        "state-ok",
+      );
+    }
   }
 
   async function createBcfIssue(group) {
@@ -3935,6 +3962,7 @@
       );
     }
 
+    var captureWarning = "";
     try {
       await createTopicCaptureAttachmentViaRawApi(
         api,
@@ -3943,11 +3971,11 @@
         group,
       );
     } catch (error) {
-      throw new Error(
-        "Topic " +
-          topicId +
-          " ble opprettet, men capture feilet: " +
-          getErrorMessage(error),
+      captureWarning = getErrorMessage(error);
+      console.warn(
+        "[IDS SVV] Topic opprettet uten capture:",
+        topicId,
+        captureWarning,
       );
     }
 
@@ -3956,6 +3984,7 @@
       viewpoint: viewpointResponse,
       topicId: topicId,
       viewpointId: viewpointId,
+      captureWarning: captureWarning,
     };
   }
 
