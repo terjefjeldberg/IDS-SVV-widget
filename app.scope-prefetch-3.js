@@ -1257,7 +1257,19 @@
       try {
         var catalog = await fetchViaFindObjects(state.streamBim.api);
         var objects = coerceArray(catalog && catalog.objects);
-        if (objects.length) {
+        var options = buildScopeOptionsFromObjects(objects);
+        if (!hasUsableScopeOptions(options)) {
+          var methodCatalog = await fetchScopeCatalogViaObjectsMethod(
+            state.streamBim.api,
+          );
+          var methodObjects = coerceArray(methodCatalog && methodCatalog.objects);
+          if (methodObjects.length) {
+            objects = methodObjects;
+            options = buildScopeOptionsFromObjects(objects);
+          }
+        }
+
+        if (hasUsableScopeOptions(options)) {
           syncScopeFilterOptions(objects);
           state.scopeCatalogLoaded = true;
         }
@@ -1268,6 +1280,33 @@
     })();
 
     return state.scopeCatalogPromise;
+  }
+
+  async function fetchScopeCatalogViaObjectsMethod(api) {
+    var objectMethod = firstAvailableMethod(api, [
+      "getObjectsWithProperties",
+      "getModelObjectsWithProperties",
+      "getAllObjectsWithProperties",
+      "getModelObjects",
+      "getObjects",
+    ]);
+    if (!objectMethod) {
+      return { objects: [] };
+    }
+
+    var response = await invokeMethodGuessing(api, objectMethod, [
+      { includeProperties: true, limit: 600, skip: 0 },
+      { withProperties: true, limit: 600, skip: 0 },
+      { limit: 600, skip: 0 },
+      { includeProperties: true },
+      { withProperties: true },
+      {},
+    ]);
+    var rawObjects = coerceArray(
+      (response && (response.objects || response.items || response.results)) ||
+        response,
+    ).slice(0, 800);
+    return { objects: normalizeObjects(rawObjects).objects };
   }
 
   function onScopeFilterChanged() {
@@ -1489,6 +1528,9 @@
       if (!scopeKey) {
         return;
       }
+      if (scopeKey === "__default__") {
+        return;
+      }
       if (scopeKey.indexOf("synthetic-ifcproject::") === 0) {
         return;
       }
@@ -1530,6 +1572,23 @@
       .sort(function (a, b) {
         return String(a.label).localeCompare(String(b.label));
       });
+  }
+
+  function hasUsableScopeOptions(options) {
+    return coerceArray(options).some(function (option) {
+      var key = stringifyValue(option && option.key).trim();
+      var label = normalizeComparisonText(option && option.label);
+      if (!key || key === "__default__") {
+        return false;
+      }
+      if (key.indexOf("synthetic-ifcproject::") === 0) {
+        return false;
+      }
+      if (label === "uspesifisert modellag") {
+        return false;
+      }
+      return true;
+    });
   }
 
   function syncScopeFilterOptions(objects) {
