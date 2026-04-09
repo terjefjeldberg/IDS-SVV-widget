@@ -1,10 +1,10 @@
-(function () {
+﻿(function () {
   "use strict";
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-04-09-scope-prefetch-2";
-  var SCOPE_CACHE_KEY = "ids-svv-scope-options-v1";
+  var BUILD_ID = "2026-04-09-scope-prefetch-4";
+  var SCOPE_CACHE_KEY = "ids-svv-scope-options-v2";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -64,7 +64,7 @@
   function renderBuildInfo() {
     if (els.connectionDetail) {
       els.connectionDetail.textContent =
-        "Build " + BUILD_ID + " - venter på parent frame";
+        "Build " + BUILD_ID + " - venter p\u00e5 parent frame";
     }
     if (typeof console !== "undefined" && console.info) {
       console.info("[IDS SVV] Build", BUILD_ID);
@@ -107,7 +107,7 @@
     }
     setConnectionState(
       "Kobler til",
-      "Build " + BUILD_ID + " - venter p? parent frame",
+      "Build " + BUILD_ID + " - venter p\u00e5 parent frame",
       "",
     );
     state.streamBim.connectPromise = window.StreamBIM.connect({})
@@ -151,7 +151,7 @@
         setConnectionState(
           "Ikke tilkoblet",
           getErrorMessage(error) ||
-            "Kj?r widgeten inne i StreamBIM for ? hente modell-data",
+            "Kj\u00f8r widgeten inne i StreamBIM for \u00e5 hente modell-data",
           "state-error",
         );
         return false;
@@ -277,7 +277,7 @@
           ? " (" + state.streamBim.lastConnectError + ")"
           : "";
         setRunStatus(
-          "Widgeten er ikke koblet til StreamBIM. Kj?r den inne i StreamBIM for ? hente IFC-data." +
+          "Widgeten er ikke koblet til StreamBIM. Kj\u00f8r den inne i StreamBIM for \u00e5 hente IFC-data." +
             connectDetails,
           "state-error",
         );
@@ -1245,23 +1245,41 @@
     if (state.scopeCatalogPromise) {
       return state.scopeCatalogPromise;
     }
-    if (
-      !state.streamBim ||
-      !state.streamBim.api ||
-      typeof state.streamBim.api.findObjects !== "function"
-    ) {
+    if (!state.streamBim || !state.streamBim.api) {
       return;
     }
 
     state.scopeCatalogPromise = (async function () {
       try {
-        var catalog = await fetchViaFindObjects(state.streamBim.api);
-        var objects = coerceArray(catalog && catalog.objects);
-        var options = buildScopeOptionsFromObjects(objects);
+        var api = state.streamBim.api;
+        var objects = [];
+        var options = [];
+
+        await refreshModelLayerOptions();
+        syncScopeFilterOptions([]);
+        options = coerceArray(state.streamBim && state.streamBim.modelLayers).map(
+          function (layer) {
+            return {
+              key: "__building__::" + stringifyValue(layer && layer.id),
+              label:
+                stringifyValue(layer && layer.id) +
+                " / " +
+                stringifyValue(layer && layer.label),
+            };
+          },
+        );
+
+        if (
+          !hasUsableScopeOptions(options) &&
+          typeof api.findObjects === "function"
+        ) {
+          var catalog = await fetchViaFindObjects(api);
+          objects = coerceArray(catalog && catalog.objects);
+          options = buildScopeOptionsFromObjects(objects);
+        }
+
         if (!hasUsableScopeOptions(options)) {
-          var methodCatalog = await fetchScopeCatalogViaObjectsMethod(
-            state.streamBim.api,
-          );
+          var methodCatalog = await fetchScopeCatalogViaObjectsMethod(api);
           var methodObjects = coerceArray(methodCatalog && methodCatalog.objects);
           if (methodObjects.length) {
             objects = methodObjects;
@@ -1367,13 +1385,7 @@
       }
     }
 
-    layers = layers.concat(await tryMethod("getBuildings"));
-    if (!layers.length) {
-      layers = layers.concat(await tryMethod("getBuildingList"));
-    }
-    if (!layers.length) {
-      layers = layers.concat(await tryMethod("getModelLayers"));
-    }
+    layers = layers.concat(await tryMethod("getModelLayers"));
     if (!layers.length) {
       layers = layers.concat(await tryMethod("getLayers"));
     }
@@ -1574,21 +1586,23 @@
       });
   }
 
+  function isUsableScopeOption(option) {
+    var key = stringifyValue(option && option.key).trim();
+    var label = normalizeComparisonText(option && option.label);
+    if (!key || key === "__default__") {
+      return false;
+    }
+    if (key.indexOf("synthetic-ifcproject::") === 0) {
+      return false;
+    }
+    if (label === "uspesifisert modellag") {
+      return false;
+    }
+    return true;
+  }
+
   function hasUsableScopeOptions(options) {
-    return coerceArray(options).some(function (option) {
-      var key = stringifyValue(option && option.key).trim();
-      var label = normalizeComparisonText(option && option.label);
-      if (!key || key === "__default__") {
-        return false;
-      }
-      if (key.indexOf("synthetic-ifcproject::") === 0) {
-        return false;
-      }
-      if (label === "uspesifisert modellag") {
-        return false;
-      }
-      return true;
-    });
+    return coerceArray(options).some(isUsableScopeOption);
   }
 
   function syncScopeFilterOptions(objects) {
@@ -1608,7 +1622,9 @@
         };
       },
     );
-    var allOptions = dedupeScopeOptions(layerOptions.concat(options));
+    var allOptions = dedupeScopeOptions(layerOptions.concat(options)).filter(
+      isUsableScopeOption,
+    );
     if (allOptions.length) {
       saveScopeOptionsToCache(allOptions);
     }
@@ -1652,13 +1668,7 @@
           label: stringifyValue(scope && scope.scopeLabel).trim(),
         };
       })
-      .filter(function (option) {
-        return (
-          option.key &&
-          option.key !== "__default__" &&
-          option.key.indexOf("synthetic-ifcproject::") !== 0
-        );
-      });
+      .filter(isUsableScopeOption);
     if (!options.length) {
       return;
     }
@@ -1718,7 +1728,9 @@
         return;
       }
       var parsed = JSON.parse(raw);
-      var cached = dedupeScopeOptions(coerceArray(parsed));
+      var cached = dedupeScopeOptions(coerceArray(parsed)).filter(
+        isUsableScopeOption,
+      );
       if (!cached.length) {
         return;
       }
@@ -6367,4 +6379,6 @@
       .replace(/'/g, "&#39;");
   }
 })();
+
+
 
