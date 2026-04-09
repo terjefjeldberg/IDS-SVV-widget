@@ -4,6 +4,7 @@
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
   var BUILD_ID = "2026-03-27-bcf-capture-1";
+  var SCOPE_CACHE_KEY = "ids-svv-scope-options-v1";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -34,6 +35,7 @@
   function init() {
     bindElements();
     bindEvents();
+    loadScopeOptionsFromCache();
     renderBuildInfo();
     connectToStreamBim();
   }
@@ -1337,7 +1339,39 @@
       layers = layers.concat(await tryMethod("getLayers"));
     }
 
+    if (!layers.length) {
+      layers = layers.concat(await discoverModelLayersViaMethods(api));
+    }
+
     return dedupeModelLayers(layers);
+  }
+
+  async function discoverModelLayersViaMethods(api) {
+    var names = coerceArray(state.streamBim && state.streamBim.methods)
+      .filter(function (name) {
+        return /(layer|model|building|discipline|tile)/i.test(name || "");
+      })
+      .filter(function (name) {
+        return !/(object|search|info|property|bcf|topic|guid|capture)/i.test(
+          name || "",
+        );
+      })
+      .slice(0, 20);
+
+    for (var i = 0; i < names.length; i += 1) {
+      try {
+        var result = await invokeMethodGuessing(api, names[i], [
+          undefined,
+          {},
+          { limit: 1000 },
+        ]);
+        var parsed = normalizeModelLayersFromResponse(result);
+        if (parsed.length) {
+          return parsed;
+        }
+      } catch (error) {}
+    }
+    return [];
   }
 
   function normalizeModelLayersFromResponse(response) {
@@ -1363,6 +1397,13 @@
 
     return coerceArray(items)
       .map(function (item) {
+        if (typeof item === "string") {
+          var text = item.trim();
+          if (!text) {
+            return null;
+          }
+          return { id: text, label: text };
+        }
         var id = stringifyValue(
           pickFirst(item || {}, [
             "id",
@@ -1384,6 +1425,19 @@
           ]),
           id,
         ]);
+        if (!id) {
+          id = stringifyValue(
+            pickFirst(item || {}, [
+              "name",
+              "label",
+              "title",
+              "buildingName",
+              "BuildingName",
+              "modelLayerName",
+              "ModelLayerName",
+            ]),
+          ).trim();
+        }
         if (!id) {
           return null;
         }
@@ -1496,6 +1550,9 @@
       },
     );
     var allOptions = dedupeScopeOptions(layerOptions.concat(options));
+    if (allOptions.length) {
+      saveScopeOptionsToCache(allOptions);
+    }
     var html = ['<option value="__all__">Alle modellag</option>']
       .concat(
         allOptions.map(function (option) {
@@ -1546,6 +1603,7 @@
     if (!options.length) {
       return;
     }
+    saveScopeOptionsToCache(options);
 
     var html = ['<option value="__all__">Alle modellag</option>']
       .concat(
@@ -1574,6 +1632,52 @@
       seen[key] = true;
       return true;
     });
+  }
+
+  function saveScopeOptionsToCache(options) {
+    try {
+      if (typeof localStorage === "undefined") {
+        return;
+      }
+      localStorage.setItem(
+        SCOPE_CACHE_KEY,
+        JSON.stringify(dedupeScopeOptions(options)),
+      );
+    } catch (error) {}
+  }
+
+  function loadScopeOptionsFromCache() {
+    if (!els.scopeFilter) {
+      return;
+    }
+    try {
+      if (typeof localStorage === "undefined") {
+        return;
+      }
+      var raw = localStorage.getItem(SCOPE_CACHE_KEY);
+      if (!raw) {
+        return;
+      }
+      var parsed = JSON.parse(raw);
+      var cached = dedupeScopeOptions(coerceArray(parsed));
+      if (!cached.length) {
+        return;
+      }
+      var html = ['<option value="__all__">Alle modellag</option>']
+        .concat(
+          cached.map(function (option) {
+            return (
+              '<option value="' +
+              escapeHtml(option.key) +
+              '">' +
+              escapeHtml(option.label || option.key) +
+              "</option>"
+            );
+          }),
+        )
+        .join("");
+      els.scopeFilter.innerHTML = html;
+    } catch (error) {}
   }
 
   function filterObjectsByScope(objects, scopeKey) {
