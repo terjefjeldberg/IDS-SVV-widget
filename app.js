@@ -415,25 +415,6 @@
       }
     }
 
-    if (best.objects.length && genericMethodAvailable) {
-      try {
-        var generic = await fetchViaGenericObjectMethods(api);
-        if (generic.objects.length) {
-          best = {
-            objects: mergeUniqueObjects(best.objects, generic.objects),
-            diagnostic: best.diagnostic || generic.diagnostic || "",
-          };
-        }
-      } catch (error) {
-        diagnostics.push(
-          "Build " +
-            BUILD_ID +
-            ": Bred property-hydrering feilet: " +
-            getErrorMessage(error),
-        );
-      }
-    }
-
     if (
       best.objects.length &&
       typeof api.makeApiRequest === "function" &&
@@ -461,7 +442,11 @@
     }
 
     if (genericMethodAvailable) {
-      return fetchViaGenericObjectMethods(api);
+      var generic = await fetchViaGenericObjectMethods(api);
+      return {
+        objects: generic.objects,
+        diagnostic: generic.diagnostic || diagnostics.slice(0, 3).join(" | "),
+      };
     }
 
     return {
@@ -500,11 +485,10 @@
       }
 
       for (var j = 0; j < candidates.length; j += 1) {
-        var hydrated = await bestEffortGetObjectInfo(api, candidates[j]);
         storeApplicableObject(
           identities,
           objects,
-          mergeObjectPayloads(candidates[j], hydrated),
+          candidates[j],
           searches[i],
           [
             "search",
@@ -527,14 +511,10 @@
         }
 
         for (var l = 0; l < seedCandidates.length; l += 1) {
-          var seedHydrated = await bestEffortGetObjectInfo(
-            api,
-            seedCandidates[l],
-          );
           storeApplicableObject(
             identities,
             objects,
-            mergeObjectPayloads(seedCandidates[l], seedHydrated),
+            seedCandidates[l],
             seedSearches[k],
             [
               "seed",
@@ -634,19 +614,18 @@
       };
     }
 
-    var hydrated = await hydrateObjects(api, allItems);
     var uniqueObjects = [];
     var seen = {};
 
-    for (var i = 0; i < hydrated.length; i += 1) {
+    for (var i = 0; i < allItems.length; i += 1) {
       var identity =
-        buildObjectIdentity(hydrated[i]) ||
-        buildFallbackIdentityToken(hydrated[i], "fallback-find::" + i);
+        buildObjectIdentity(allItems[i]) ||
+        buildFallbackIdentityToken(allItems[i], "fallback-find::" + i);
       if (!identity || seen[identity]) {
         continue;
       }
       seen[identity] = true;
-      uniqueObjects.push(hydrated[i]);
+      uniqueObjects.push(allItems[i]);
     }
 
     return {
@@ -694,11 +673,10 @@
 
       for (var j = 0; j < guids.length; j += 1) {
         var guid = stringifyValue(guids[j]);
-        var hydrated = await bestEffortGetObjectInfo(api, guids[j]);
         storeApplicableObject(
           identities,
           objects,
-          mergeObjectPayloads({ guid: guid }, hydrated),
+          { guid: guid },
           searches[i],
           guid,
         );
