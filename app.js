@@ -23,6 +23,8 @@
     selectedScopeKey: "__all__",
     selectedBuildingId: "",
     lastValidationSource: null,
+    scopeCatalogLoaded: false,
+    scopeCatalogPromise: null,
   };
 
   var els = {};
@@ -73,6 +75,8 @@
     els.validateBtn.addEventListener("click", runValidation);
     if (els.scopeFilter) {
       els.scopeFilter.addEventListener("change", onScopeFilterChanged);
+      els.scopeFilter.addEventListener("focus", onScopeFilterFocus);
+      els.scopeFilter.addEventListener("click", onScopeFilterFocus);
     }
     if (els.createAllBcfBtn) {
       els.createAllBcfBtn.addEventListener("click", createBcfForAllGroups);
@@ -278,6 +282,7 @@
         return;
       }
     }
+    await ensureScopeCatalogLoaded();
 
     toggleBusy(true);
     setRunStatus(
@@ -1225,6 +1230,42 @@
     return uniqueStrings(keys.concat(propertyNameVariants, aliasKeys)).filter(
       Boolean,
     );
+  }
+
+  async function onScopeFilterFocus() {
+    await ensureScopeCatalogLoaded();
+  }
+
+  async function ensureScopeCatalogLoaded() {
+    if (state.scopeCatalogLoaded) {
+      return;
+    }
+    if (state.scopeCatalogPromise) {
+      return state.scopeCatalogPromise;
+    }
+    if (
+      !state.streamBim ||
+      !state.streamBim.api ||
+      typeof state.streamBim.api.findObjects !== "function"
+    ) {
+      return;
+    }
+
+    state.scopeCatalogPromise = (async function () {
+      try {
+        var catalog = await fetchViaFindObjects(state.streamBim.api);
+        var objects = coerceArray(catalog && catalog.objects);
+        if (objects.length) {
+          syncScopeFilterOptions(objects);
+          state.scopeCatalogLoaded = true;
+        }
+      } catch (error) {
+      } finally {
+        state.scopeCatalogPromise = null;
+      }
+    })();
+
+    return state.scopeCatalogPromise;
   }
 
   function onScopeFilterChanged() {
