@@ -1201,7 +1201,28 @@
       });
     });
 
-    return uniqueStrings(keys.concat(propertyNameVariants)).filter(Boolean);
+    var aliasKeys = [];
+    propertyNameVariants.forEach(function (name) {
+      var normalized = normalizeComparisonText(name);
+      if (normalized === "ifcclass" || normalized === "entity" || normalized === "type") {
+        aliasKeys = aliasKeys.concat([
+          "IfcClass",
+          "ifcClass",
+          "ifcclass",
+          "Entity",
+          "entity",
+          "Type",
+          "type",
+        ]);
+      }
+      if (normalized === "name") {
+        aliasKeys = aliasKeys.concat(["Name", "name"]);
+      }
+    });
+
+    return uniqueStrings(keys.concat(propertyNameVariants, aliasKeys)).filter(
+      Boolean,
+    );
   }
 
   function stripSchemaSuffix(value) {
@@ -2636,7 +2657,25 @@
       },
     );
 
-    return propertyRules.concat(attributeRules);
+    var entityRules = childElementsByLocalName(parent, "entity").map(
+      function (entityEl) {
+        var entityName = textFromNested(entityEl, ["name", "simpleValue"]);
+        if (!entityName) {
+          entityName = textFromNested(entityEl, ["name"]);
+        }
+        return {
+          sourceType: "entity",
+          propertySet: "@entity",
+          baseName: "IfcClass",
+          cardinality: entityEl.getAttribute("cardinality") || "required",
+          valueRule: entityName
+            ? { type: "equals", value: entityName }
+            : { type: "any" },
+        };
+      },
+    );
+
+    return propertyRules.concat(attributeRules, entityRules);
   }
 
   function parseIdsValueRule(valueEl) {
@@ -3128,6 +3167,13 @@
   function getRuleValue(object, rule) {
     if (!rule) {
       return null;
+    }
+    if (rule.sourceType === "entity") {
+      return firstNonEmpty([
+        object && object.type,
+        object && object.ifcClass,
+        object && object.entity,
+      ]);
     }
     if (rule.sourceType === "attribute") {
       return getAttributeValue(object, rule.baseName);
