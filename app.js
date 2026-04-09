@@ -2090,6 +2090,7 @@
           pickFirst(item, ["name", "label", "title", "displayName", "Name"]) ||
           pickFirst(item, ["guid", "globalId", "ifcGuid"]) ||
           "Objekt " + (index + 1),
+        description: pickFirst(item, ["description", "Description"]),
         type:
           pickFirst(item, [
             "ifcClass",
@@ -2113,7 +2114,152 @@
       });
     });
 
+    objects = addSyntheticIfcProjectObjects(objects);
     return { objects: objects, haveProperties: haveProperties };
+  }
+
+  function addSyntheticIfcProjectObjects(objects) {
+    var hasIfcProject = coerceArray(objects).some(function (object) {
+      return (
+        normalizeComparisonText(
+          firstNonEmpty([object && object.type, object && object.ifcClass]),
+        ) === "ifcproject"
+      );
+    });
+    if (hasIfcProject) {
+      return objects;
+    }
+
+    var objectList = coerceArray(objects);
+    if (!objectList.length) {
+      return objects;
+    }
+
+    var representative = objectList[0];
+    var modelName = firstNonEmpty([
+      representative && representative.modelName,
+      representative && representative.scopeLabel,
+      "Ukjent modell",
+    ]);
+    var key = normalizeComparisonText(modelName) || "unknown";
+    var inferred = inferProjectMetadataFromObjects(objectList);
+
+    // Avoid false green checks when we cannot read real IfcProject metadata.
+    var projectName = inferred && inferred.name ? inferred.name : "";
+    var projectDescription =
+      (inferred && inferred.description) ||
+      firstNonEmpty([representative && representative.description, modelName]);
+
+    var synthetic = {
+      id: "synthetic-ifcproject::" + key,
+      guid: "",
+      name: projectName,
+      description: projectDescription,
+      type: "IFCPROJECT",
+      modelName: modelName,
+      layerName: firstNonEmpty([representative && representative.layerName]),
+      scopeKey:
+        firstNonEmpty([representative && representative.scopeKey]) ||
+        "synthetic-ifcproject::" + key,
+      scopeLabel:
+        firstNonEmpty([representative && representative.scopeLabel]) || modelName,
+      propertySets: {
+        "__attributes__": {
+          Name: projectName,
+          Description: projectDescription,
+        },
+      },
+      idsApplicableSpecs: [],
+      raw: {
+        synthetic: true,
+        type: "IFCPROJECT",
+        Name: projectName,
+        Description: projectDescription,
+      },
+    };
+
+    return objects.concat([synthetic]);
+  }
+
+  function inferProjectMetadataFromObjects(objects) {
+    var objectList = coerceArray(objects);
+    if (!objectList.length) {
+      return { name: "", description: "" };
+    }
+
+    var nameFields = [
+      "projectName",
+      "ProjectName",
+      "project",
+      "Project",
+      "ifcProjectName",
+      "IfcProjectName",
+      "projectLongName",
+      "ProjectLongName",
+      "LongName",
+      "Long Name",
+      "Project Name",
+      "Project Long Name",
+      "IfcProject",
+    ];
+    var descriptionFields = [
+      "projectDescription",
+      "ProjectDescription",
+      "ifcProjectDescription",
+      "IfcProjectDescription",
+      "projectLongDescription",
+      "Project Long Description",
+    ];
+    var namePsetFields = [
+      "ProjectName",
+      "Project Name",
+      "IfcProjectName",
+      "Ifc Project Name",
+      "IfcProject",
+      "Project",
+      "LongName",
+      "Long Name",
+    ];
+    var descriptionPsetFields = [
+      "ProjectDescription",
+      "Project Description",
+      "IfcProjectDescription",
+      "Ifc Project Description",
+      "Long Description",
+    ];
+
+    var bestName = "";
+    var bestDescription = "";
+    for (var i = 0; i < objectList.length; i += 1) {
+      var object = objectList[i] || {};
+      var raw = object.raw || object;
+
+      if (!bestName) {
+        bestName = firstNonEmpty([
+          pickFirst(raw, nameFields),
+          findPropertyAcrossSets(object.propertySets || {}, namePsetFields),
+        ]);
+      }
+
+      if (!bestDescription) {
+        bestDescription = firstNonEmpty([
+          pickFirst(raw, descriptionFields),
+          findPropertyAcrossSets(
+            object.propertySets || {},
+            descriptionPsetFields,
+          ),
+        ]);
+      }
+
+      if (bestName && bestDescription) {
+        break;
+      }
+    }
+
+    return {
+      name: bestName || "",
+      description: bestDescription || "",
+    };
   }
 
   function extractPropertySets(source) {
@@ -3185,6 +3331,10 @@
     var key = normalizeComparisonText(attributeName || "Name");
     var attributeMap = {
       name: firstNonEmpty([object && object.name, object && object.Name]),
+      description: firstNonEmpty([
+        object && object.description,
+        object && object.Description,
+      ]),
       ifcclass: firstNonEmpty([object && object.type, object && object.ifcClass]),
       type: firstNonEmpty([object && object.type, object && object.ifcClass]),
       guid: firstNonEmpty([
