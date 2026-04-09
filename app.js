@@ -1296,26 +1296,6 @@
       layers = layers.concat(await tryMethod("getLayers"));
     }
 
-    if (!layers.length && typeof api.makeApiRequest === "function") {
-      var context = await createRawIfcApiContext(api);
-      if (context && context.apiBase) {
-        var endpoints = ["/buildings", "/buildings/export/json"];
-        for (var i = 0; i < endpoints.length; i += 1) {
-          try {
-            var response = await makeApiJsonRequest(api, {
-              url: context.apiBase + endpoints[i],
-              method: "GET",
-              accept: "application/json",
-            });
-            layers = normalizeModelLayersFromResponse(response);
-            if (layers.length) {
-              break;
-            }
-          } catch (error) {}
-        }
-      }
-    }
-
     return dedupeModelLayers(layers);
   }
 
@@ -1500,6 +1480,49 @@
     state.selectedBuildingId = getSelectedBuildingId();
   }
 
+  function syncScopeFilterFromReport(report) {
+    if (!els.scopeFilter || !report || !Array.isArray(report.scopes)) {
+      return;
+    }
+    var hasOnlyAll = els.scopeFilter.options.length <= 1;
+    if (!hasOnlyAll) {
+      return;
+    }
+    var options = report.scopes
+      .map(function (scope) {
+        return {
+          key: stringifyValue(scope && scope.scopeKey).trim(),
+          label: stringifyValue(scope && scope.scopeLabel).trim(),
+        };
+      })
+      .filter(function (option) {
+        return (
+          option.key &&
+          option.key !== "__default__" &&
+          option.key.indexOf("synthetic-ifcproject::") !== 0
+        );
+      });
+    if (!options.length) {
+      return;
+    }
+
+    var html = ['<option value="__all__">Alle modellag</option>']
+      .concat(
+        dedupeScopeOptions(options).map(function (option) {
+          return (
+            '<option value="' +
+            escapeHtml(option.key) +
+            '">' +
+            escapeHtml(option.label || option.key) +
+            "</option>"
+          );
+        }),
+      )
+      .join("");
+    els.scopeFilter.innerHTML = html;
+    els.scopeFilter.value = state.selectedScopeKey || "__all__";
+  }
+
   function dedupeScopeOptions(options) {
     var seen = {};
     return coerceArray(options).filter(function (option) {
@@ -1549,6 +1572,7 @@
     var selectedScopeLabel = getSelectedScopeLabel();
     var filteredObjects = filterObjectsByScope(allObjects, selectedScopeKey);
     var report = validateObjects(specs, filteredObjects);
+    syncScopeFilterFromReport(report);
     state.validation = report;
     renderSummary(report);
     renderResultTable(report);
