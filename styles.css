@@ -181,6 +181,29 @@ input {
     font-size: 0.9rem;
 }
 
+.filter-row {
+    margin-top: 14px;
+    display: grid;
+    gap: 8px;
+}
+
+.filter-label {
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.scope-filter {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 9px 10px;
+    background: #101a29;
+    color: var(--ink);
+}
+
 .actions {
     display: flex;
     gap: 12px;

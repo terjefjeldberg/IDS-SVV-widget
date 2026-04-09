@@ -19,6 +19,8 @@
     idsText: "",
     idsName: "",
     validation: null,
+    selectedScopeKey: "__all__",
+    lastValidationSource: null,
   };
 
   var els = {};
@@ -42,6 +44,7 @@
     els.idsFileName = byId("ids-file-name");
     els.loadSampleBtn = byId("load-sample-btn");
     els.validateBtn = byId("validate-btn");
+    els.scopeFilter = byId("scope-filter");
     els.createAllBcfBtn = byId("create-all-bcf-btn");
     els.metricObjects = byId("metric-objects");
     els.metricSpecs = byId("metric-specs");
@@ -66,6 +69,9 @@
     els.idsFile.addEventListener("change", onIdsFileSelected);
     els.loadSampleBtn.addEventListener("click", loadSampleIds);
     els.validateBtn.addEventListener("click", runValidation);
+    if (els.scopeFilter) {
+      els.scopeFilter.addEventListener("change", onScopeFilterChanged);
+    }
     if (els.createAllBcfBtn) {
       els.createAllBcfBtn.addEventListener("click", createBcfForAllGroups);
     }
@@ -281,36 +287,16 @@
         state.streamBim.api,
         specs,
       );
-      var report = validateObjects(specs, modelData.objects);
-      state.validation = report;
-      renderSummary(report);
-      renderResultTable(report);
-      renderPropertyDebug(specs, modelData.objects);
-      renderGroups(report);
-
-      if (!report.summary.applicableObjectCount) {
-        var noMatchMessage =
-          "Validering ferdig, men ingen objekter ble vurdert mot kravene i IDS-en.";
-        var uniqueObjectCount = countUniqueObjects(modelData.objects || []);
-        if (uniqueObjectCount) {
-          noMatchMessage +=
-            " Widgeten leste " +
-            uniqueObjectCount +
-            " objekter, men fant ingen som var relevante for denne IDS-en.";
-        }
-        noMatchMessage +=
-          " Sjekk at utvalget i IDS-en bruker property-navn og verdier som faktisk finnes i StreamBIM.";
-        setRunStatus(noMatchMessage, "state-warn");
-      } else {
-        setRunStatus(
-          report.groups.length
-            ? "Validering ferdig. Se detaljer under Avvik."
-            : "Validering ferdig. Ingen verdiavvik funnet.",
-          report.groups.length ? "state-warn" : "state-ok",
-        );
-      }
+      var allObjects = coerceArray(modelData && modelData.objects);
+      state.lastValidationSource = {
+        specs: specs,
+        objects: allObjects,
+      };
+      syncScopeFilterOptions(allObjects);
+      renderValidationForSelectedScope(specs, allObjects);
     } catch (error) {
       state.validation = null;
+      state.lastValidationSource = null;
       renderSummary(null);
       renderResultTable(null);
       renderPropertyDebug(null, null);
@@ -1215,6 +1201,161 @@
 
     return uniqueStrings(keys.concat(propertyNameVariants, aliasKeys)).filter(
       Boolean,
+    );
+  }
+
+  function onScopeFilterChanged() {
+    state.selectedScopeKey = getSelectedScopeKey();
+    if (
+      !state.lastValidationSource ||
+      !coerceArray(state.lastValidationSource.specs).length
+    ) {
+      return;
+    }
+    renderValidationForSelectedScope(
+      state.lastValidationSource.specs,
+      state.lastValidationSource.objects,
+      true,
+    );
+  }
+
+  function getSelectedScopeKey() {
+    if (!els.scopeFilter) {
+      return "__all__";
+    }
+    var value = stringifyValue(els.scopeFilter.value).trim();
+    return value || "__all__";
+  }
+
+  function getSelectedScopeLabel() {
+    if (!els.scopeFilter || !els.scopeFilter.options.length) {
+      return "Alle modellag";
+    }
+    var selected =
+      els.scopeFilter.options[els.scopeFilter.selectedIndex] ||
+      els.scopeFilter.options[0];
+    return (selected && selected.textContent) || "Alle modellag";
+  }
+
+  function buildScopeOptionsFromObjects(objects) {
+    var map = {};
+    coerceArray(objects).forEach(function (object) {
+      var scopeKey = stringifyValue(object && object.scopeKey).trim();
+      if (!scopeKey) {
+        return;
+      }
+      if (scopeKey.indexOf("synthetic-ifcproject::") === 0) {
+        return;
+      }
+      if (!map[scopeKey]) {
+        map[scopeKey] = {
+          key: scopeKey,
+          label:
+            stringifyValue(object && object.scopeLabel).trim() ||
+            "Uspesifisert modellag",
+        };
+      }
+    });
+    return Object.keys(map)
+      .map(function (key) {
+        return map[key];
+      })
+      .sort(function (a, b) {
+        return String(a.label).localeCompare(String(b.label));
+      });
+  }
+
+  function syncScopeFilterOptions(objects) {
+    if (!els.scopeFilter) {
+      return;
+    }
+    var previous = state.selectedScopeKey || getSelectedScopeKey();
+    var options = buildScopeOptionsFromObjects(objects);
+    var html = ['<option value="__all__">Alle modellag</option>']
+      .concat(
+        options.map(function (option) {
+          return (
+            '<option value="' +
+            escapeHtml(option.key) +
+            '">' +
+            escapeHtml(option.label) +
+            "</option>"
+          );
+        }),
+      )
+      .join("");
+    els.scopeFilter.innerHTML = html;
+
+    var selectedExists =
+      previous === "__all__" ||
+      options.some(function (option) {
+        return option.key === previous;
+      });
+    els.scopeFilter.value = selectedExists ? previous : "__all__";
+    state.selectedScopeKey = getSelectedScopeKey();
+  }
+
+  function filterObjectsByScope(objects, scopeKey) {
+    if (!scopeKey || scopeKey === "__all__") {
+      return coerceArray(objects).slice();
+    }
+    return coerceArray(objects).filter(function (object) {
+      return stringifyValue(object && object.scopeKey) === scopeKey;
+    });
+  }
+
+  function renderValidationForSelectedScope(specs, allObjects, fromCache) {
+    var selectedScopeKey = getSelectedScopeKey();
+    var selectedScopeLabel = getSelectedScopeLabel();
+    var filteredObjects = filterObjectsByScope(allObjects, selectedScopeKey);
+    var report = validateObjects(specs, filteredObjects);
+    state.validation = report;
+    renderSummary(report);
+    renderResultTable(report);
+    renderPropertyDebug(specs, filteredObjects);
+    renderGroups(report);
+
+    if (!report.summary.applicableObjectCount) {
+      var noMatchMessage =
+        "Validering ferdig for " +
+        selectedScopeLabel +
+        ", men ingen objekter ble vurdert mot IDS.";
+      var uniqueObjectCount = countUniqueObjects(filteredObjects || []);
+      if (uniqueObjectCount) {
+        noMatchMessage +=
+          " Widgeten leste " +
+          uniqueObjectCount +
+          " objekter i valgt modellag.";
+      }
+      noMatchMessage +=
+        " Sjekk at utvalget i IDS-en bruker property-navn og verdier som faktisk finnes i StreamBIM.";
+      setRunStatus(noMatchMessage, "state-warn");
+      return;
+    }
+
+    if (fromCache) {
+      setRunStatus(
+        report.groups.length
+          ? "Oppdatert visning for " +
+              selectedScopeLabel +
+              ". Se detaljer under Avvik."
+          : "Oppdatert visning for " +
+              selectedScopeLabel +
+              ". Ingen verdiavvik funnet.",
+        report.groups.length ? "state-warn" : "state-ok",
+      );
+      return;
+    }
+
+    setRunStatus(
+      report.groups.length
+        ? "Validering ferdig for " +
+            selectedScopeLabel +
+            ". Se detaljer under Avvik."
+        : "Validering ferdig for " +
+            selectedScopeLabel +
+            ". Ingen verdiavvik funnet.",
+      report.groups.length ? "state-warn" : "state-ok",
     );
   }
 
