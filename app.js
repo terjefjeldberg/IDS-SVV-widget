@@ -450,7 +450,7 @@
         diagnostics.push(
           "Build " +
             BUILD_ID +
-            ": Raa property-hydrering feilet: " +
+            ": Rå property-hydrering feilet: " +
             getErrorMessage(error),
         );
       }
@@ -470,7 +470,7 @@
         diagnostics.filter(Boolean).slice(0, 5).join(" | ") ||
         "Build " +
           BUILD_ID +
-          ": Widgeten fant ingen IDS-treff via StreamBIM-sok, og denne prosjektkonfigurasjonen tilbyr ingen fullmodell-metode for widgeter.",
+          ": Widgeten fant ingen IDS-treff via StreamBIM-søk, og denne prosjektkonfigurasjonen tilbyr ingen fullmodell-metode for widgeter.",
     };
   }
 
@@ -487,7 +487,7 @@
         diagnostic:
           "Build " +
           BUILD_ID +
-          ": IDS-applicability ga ingen konkrete property-sok. Verken eksakte verdier eller faste property-navn kunne utledes fra IDS-filen.",
+          ": IDS-applicability ga ingen konkrete property-søk. Verken eksakte verdier eller faste property-navn kunne utledes fra IDS-filen.",
       };
     }
 
@@ -614,7 +614,7 @@
         diagnostic:
           "Build " +
           BUILD_ID +
-          ": Generell findObjects-fallback returnerte ingen objekter via tomt Name/ID-sok" +
+          ": Generell findObjects-fallback returnerte ingen objekter via tomt Name/ID-søk" +
           (errors.length
             ? " (siste feil: " + errors[errors.length - 1] + ")"
             : "."),
@@ -657,7 +657,7 @@
         diagnostic:
           "Build " +
           BUILD_ID +
-          ": IDS-applicability ga ingen konkrete property-sok for raa IFC API.",
+          ": IDS-applicability ga ingen konkrete property-søk for rå IFC API.",
       };
     }
 
@@ -667,7 +667,7 @@
         diagnostic:
           "Build " +
           BUILD_ID +
-          ": Klarte ikke etablere prosjektsti for raa IFC API-sok.",
+          ": Klarte ikke etablere prosjektsti for rå IFC API-søk.",
       };
     }
 
@@ -698,7 +698,7 @@
         diagnostic:
           "Build " +
           BUILD_ID +
-          ": Raa IFC API-sok returnerte ingen objektdata" +
+          ": Rå IFC API-søk returnerte ingen objektdata" +
           (diagnostics.length ? " (" + diagnostics.slice(-1)[0] + ")" : "."),
       };
     }
@@ -1172,7 +1172,7 @@
         "." +
         search.propertyName +
         "=" +
-        (search.value === "" ? "<tomt sok>" : search.value) +
+        (search.value === "" ? "<tomt søk>" : search.value) +
         ". Provde nokler: " +
         candidateKeys.join(", "),
       matchedKey: "",
@@ -1819,12 +1819,12 @@
     return {
       response: [],
       diagnostic:
-        "Raa IFC API fant ingen treff for " +
+        "Rå IFC API fant ingen treff for " +
         search.propertySet +
         "." +
         search.propertyName +
         "=" +
-        (search.value === "" ? "<tomt sok>" : search.value) +
+        (search.value === "" ? "<tomt søk>" : search.value) +
         (errors.length
           ? " (siste feil: " + errors[errors.length - 1] + ")"
           : ""),
@@ -2063,7 +2063,7 @@
     }
 
     throw new Error(
-      methodName + " feilet. Forsokte argumentvarianter: " + errors.join(" | "),
+      methodName + " feilet. Forsøkte argumentvarianter: " + errors.join(" | "),
     );
   }
 
@@ -3510,7 +3510,7 @@
   function buildGroupTitle(spec, rule, outcome) {
     if (outcome.reasonCode === "missing-required") {
       return (
-        "Manglende pakrevd verdi: " +
+        "Manglende påkrevd verdi: " +
         rule.propertySet +
         "." +
         rule.baseName +
@@ -3588,7 +3588,7 @@
     if (!report || !coerceArray(report.scopes).length) {
       els.resultTableRoot.className = "result-table-wrap empty-state";
       els.resultTableRoot.textContent =
-        "Kjor en IDS-kontroll for a se status per modellag.";
+        "Kjør en IDS-kontroll for å se status per modellag.";
       return;
     }
 
