@@ -344,11 +344,30 @@
       api,
       genericObjectMethods,
     );
+    var hasRawIfcApi =
+      typeof api.makeApiRequest === "function" &&
+      typeof api.getProjectId === "function" &&
+      typeof api.getBuildingId === "function";
 
-    if (
-      typeof api.findObjects === "function" &&
-      typeof api.getObjectInfo === "function"
-    ) {
+    if (hasRawIfcApi) {
+      fallback = await fetchViaRawIfcSearch(api, specs);
+      if (fallback.objects.length) {
+        collectedObjects = mergeUniqueObjects(
+          collectedObjects,
+          fallback.objects,
+        );
+        if (collectedObjects.length > best.objects.length) {
+          best = {
+            objects: collectedObjects.slice(),
+            diagnostic: fallback.diagnostic || "",
+          };
+        }
+      } else if (fallback.diagnostic) {
+        diagnostics.push(fallback.diagnostic);
+      }
+    }
+
+    if (!best.objects.length && typeof api.findObjects === "function") {
       fallback = await fetchViaFindObjects(api);
       if (fallback.objects.length) {
         collectedObjects = mergeUniqueObjects(
@@ -392,35 +411,7 @@
       }
     }
 
-    if (
-      typeof api.makeApiRequest === "function" &&
-      typeof api.getProjectId === "function" &&
-      typeof api.getBuildingId === "function" &&
-      typeof api.getObjectInfo === "function"
-    ) {
-      fallback = await fetchViaRawIfcSearch(api, specs);
-      if (fallback.objects.length) {
-        collectedObjects = mergeUniqueObjects(
-          collectedObjects,
-          fallback.objects,
-        );
-        if (collectedObjects.length > best.objects.length) {
-          best = {
-            objects: collectedObjects.slice(),
-            diagnostic: fallback.diagnostic || "",
-          };
-        }
-      } else if (fallback.diagnostic) {
-        diagnostics.push(fallback.diagnostic);
-      }
-    }
-
-    if (
-      best.objects.length &&
-      typeof api.makeApiRequest === "function" &&
-      typeof api.getProjectId === "function" &&
-      typeof api.getBuildingId === "function"
-    ) {
+    if (best.objects.length && hasRawIfcApi) {
       try {
         best.objects = await hydrateMissingRulePropertiesViaRawIfc(
           api,
@@ -439,6 +430,17 @@
 
     if (best.objects.length) {
       return best;
+    }
+
+    if (hasRawIfcApi) {
+      return {
+        objects: [],
+        diagnostic:
+          diagnostics.filter(Boolean).slice(0, 5).join(" | ") ||
+          "Build " +
+            BUILD_ID +
+            ": Rå IFC API ga ingen objekter for denne IDS-filen.",
+      };
     }
 
     if (genericMethodAvailable) {
