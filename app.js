@@ -1319,7 +1319,6 @@
     if (id && id !== guid) {
       candidates.push(id);
     }
-    candidates.push(object);
 
     for (var i = 0; i < candidates.length; i += 1) {
       try {
@@ -1356,7 +1355,6 @@
         if (resolvedGuid && resolvedGuid !== resolvedId) {
           resolvedCandidates.push(resolvedGuid);
         }
-        resolvedCandidates.push(resolved);
 
         for (var j = 0; j < resolvedCandidates.length; j += 1) {
           try {
@@ -1424,7 +1422,6 @@
     if (id && id !== guid) {
       candidates.push(id);
     }
-    candidates.push(merged);
 
     try {
       var propertyPayload = await invokeMethodGuessing(
