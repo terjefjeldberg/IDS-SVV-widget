@@ -1519,6 +1519,12 @@
       return object;
     }
 
+    // Seed searches are broad discovery queries and must not tag objects
+    // as applicable for a specific IDS specification.
+    if (search.isSeedSearch) {
+      return object;
+    }
+
     var applicableSpecs = uniqueStrings(
       coerceArray(
         object._idsApplicableSpecs || object.idsApplicableSpecs,
@@ -3267,7 +3273,17 @@
     }
 
     return entityRules.every(function (rule) {
-      return evaluateRule(getRuleValue(object, rule), rule).ok;
+      var actual = getRuleValue(object, rule);
+      if (
+        actual === null ||
+        typeof actual === "undefined" ||
+        String(actual).trim() === ""
+      ) {
+        // If we cannot resolve entity locally, trust the explicit hint from
+        // exact applicability search and evaluate requirements.
+        return true;
+      }
+      return evaluateRule(actual, rule).ok;
     });
   }
 
