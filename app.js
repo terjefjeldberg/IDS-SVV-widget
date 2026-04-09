@@ -506,6 +506,13 @@
           objects,
           mergeObjectPayloads(candidates[j], hydrated),
           searches[i],
+          [
+            "search",
+            i,
+            j,
+            searches[i] && searches[i].propertyName,
+            searches[i] && searches[i].value,
+          ].join("::"),
         );
       }
     }
@@ -529,6 +536,12 @@
             objects,
             mergeObjectPayloads(seedCandidates[l], seedHydrated),
             seedSearches[k],
+            [
+              "seed",
+              k,
+              l,
+              seedSearches[k] && seedSearches[k].propertyName,
+            ].join("::"),
           );
         }
       }
@@ -628,7 +641,7 @@
     for (var i = 0; i < hydrated.length; i += 1) {
       var identity =
         buildObjectIdentity(hydrated[i]) ||
-        JSON.stringify(hydrated[i]).slice(0, 120);
+        buildFallbackIdentityToken(hydrated[i], "fallback-find::" + i);
       if (!identity || seen[identity]) {
         continue;
       }
@@ -1553,8 +1566,11 @@
     }
 
     var hintedObject = applyApplicabilityHints(object, search);
-    var identity =
-      buildObjectIdentity(hintedObject) || stringifyValue(fallbackIdentity);
+    var strongIdentity = buildObjectIdentity(hintedObject);
+    var fallbackToken = stringifyValue(fallbackIdentity);
+    var identity = strongIdentity
+      ? strongIdentity + (fallbackToken ? "::" + fallbackToken : "")
+      : fallbackToken;
     if (!identity) {
       return;
     }
@@ -1576,11 +1592,24 @@
       return "";
     }
 
-    return (
-      pickFirst(object, ["guid", "globalId", "ifcGuid", "GlobalId"]) ||
-      pickFirst(object, ["id", "objectId", "dbId", "expressId"]) ||
-      pickFirst(object, ["name", "label", "title", "displayName", "Name"])
-    );
+    return firstNonEmpty([
+      pickFirst(object, ["guid", "globalId", "ifcGuid", "GlobalId"]),
+      pickFirst(object, ["id", "objectId", "dbId", "expressId"]),
+      pickFirst(object, ["name", "label", "title", "displayName", "Name"]),
+    ]);
+  }
+
+  function buildFallbackIdentityToken(object, seed) {
+    var token = firstNonEmpty([
+      pickFirst(object, ["id", "objectId", "dbId", "expressId"]),
+      pickFirst(object, ["guid", "globalId", "ifcGuid", "GlobalId"]),
+      pickFirst(object, ["name", "label", "title", "displayName", "Name"]),
+      stringifyValue(seed),
+    ]);
+    if (!token) {
+      return "";
+    }
+    return "token::" + normalizeComparisonText(token);
   }
 
   function normalizeIdentityToken(value) {
@@ -1595,6 +1624,9 @@
     }
 
     var normalized = source;
+    if (typeof source.get === "function") {
+      normalized = materializeRecordLikeObject(source);
+    }
 
     if (
       normalized.data &&
@@ -1636,6 +1668,51 @@
     }
 
     return normalized;
+  }
+
+  function materializeRecordLikeObject(source) {
+    var keyCandidates = [
+      "id",
+      "guid",
+      "globalId",
+      "ifcGuid",
+      "GlobalId",
+      "name",
+      "Name",
+      "label",
+      "title",
+      "displayName",
+      "ifcClass",
+      "IfcClass",
+      "entity",
+      "type",
+      "predefinedType",
+      "PredefinedType",
+      "modelName",
+      "layerName",
+      "objectId",
+      "dbId",
+      "expressId",
+      "attributes",
+      "properties",
+      "propertySets",
+      "groups",
+      "data",
+    ];
+
+    var plain = {};
+    for (var i = 0; i < keyCandidates.length; i += 1) {
+      var value = readField(source, keyCandidates[i]);
+      if (value !== null && typeof value !== "undefined") {
+        plain[keyCandidates[i]] = value;
+      }
+    }
+
+    if (!plain.id && source.id) {
+      plain.id = source.id;
+    }
+
+    return Object.assign({}, source, plain);
   }
 
   function extractObjectsFromResponse(response) {
@@ -1707,8 +1784,11 @@
   function buildPageSignature(items) {
     return items
       .slice(0, 10)
-      .map(function (item) {
-        return buildObjectIdentity(item) || JSON.stringify(item).slice(0, 80);
+      .map(function (item, index) {
+        return (
+          buildObjectIdentity(item) ||
+          buildFallbackIdentityToken(item, "page-signature::" + index)
+        );
       })
       .join("|");
   }
@@ -2032,7 +2112,7 @@
     allObjects.forEach(function (object) {
       var identity =
         buildObjectIdentity(object) ||
-        JSON.stringify(object && (object.raw || object)).slice(0, 120);
+        buildFallbackIdentityToken(object && (object.raw || object), "merge");
       if (!identity) {
         return;
       }
@@ -5067,11 +5147,37 @@
 
   function pickFirst(source, keys) {
     for (var i = 0; i < keys.length; i += 1) {
-      if (source && source[keys[i]]) {
-        return source[keys[i]];
+      var value = readField(source, keys[i]);
+      if (
+        value !== null &&
+        typeof value !== "undefined" &&
+        String(value).trim() !== ""
+      ) {
+        return value;
       }
     }
     return "";
+  }
+
+  function readField(source, key) {
+    if (!source || !key) {
+      return undefined;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      return source[key];
+    }
+
+    if (typeof source.get === "function") {
+      try {
+        var viaGet = source.get(key);
+        if (viaGet !== null && typeof viaGet !== "undefined") {
+          return viaGet;
+        }
+      } catch (error) {}
+    }
+
+    return source[key];
   }
 
   function firstDefined(values) {
