@@ -398,6 +398,18 @@
     }
 
     if (best.objects.length && hasRawIfcApi) {
+      if (objectsMissingScopeData(best.objects) && typeof api.findObjects === "function") {
+        try {
+          best.objects = await enrichObjectsWithScopeCatalog(api, best.objects);
+        } catch (error) {
+          diagnostics.push(
+            "Build " +
+              BUILD_ID +
+              ": Klarte ikke berike objektlisten med modellag: " +
+              getErrorMessage(error),
+          );
+        }
+      }
       try {
         best.objects = await hydrateMissingRulePropertiesViaRawIfc(
           api,
@@ -2480,6 +2492,50 @@
       name: bestName || "",
       description: bestDescription || "",
     };
+  }
+
+  function objectsMissingScopeData(objects) {
+    var list = coerceArray(objects);
+    if (!list.length) {
+      return true;
+    }
+    var withScopeCount = list.filter(function (object) {
+      return (
+        String(object && object.scopeKey || "").trim() !== "" ||
+        String(object && object.scopeLabel || "").trim() !== "" ||
+        String(object && object.modelName || "").trim() !== "" ||
+        String(object && object.layerName || "").trim() !== ""
+      );
+    }).length;
+    return withScopeCount === 0;
+  }
+
+  async function enrichObjectsWithScopeCatalog(api, objects) {
+    var scopeCatalog = await fetchViaFindObjects(api);
+    var catalogObjects = coerceArray(scopeCatalog && scopeCatalog.objects);
+    if (!catalogObjects.length) {
+      return objects;
+    }
+
+    var byGuid = {};
+    catalogObjects.forEach(function (item) {
+      var guid = normalizeIdentityToken(
+        pickFirst(item || {}, ["guid", "globalId", "ifcGuid", "GlobalId"]),
+      );
+      if (guid) {
+        byGuid[guid] = item;
+      }
+    });
+
+    return coerceArray(objects).map(function (item) {
+      var guid = normalizeIdentityToken(
+        pickFirst(item || {}, ["guid", "globalId", "ifcGuid", "GlobalId"]),
+      );
+      if (!guid || !byGuid[guid]) {
+        return item;
+      }
+      return mergeObjectPayloads(byGuid[guid], item);
+    });
   }
 
   function extractPropertySets(source) {
