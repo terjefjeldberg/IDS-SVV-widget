@@ -3,7 +3,7 @@
 
   var SAMPLE_IDS = "./Test_trekkekum.ids";
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
-  var BUILD_ID = "2026-03-27-bcf-capture-1";
+  var BUILD_ID = "2026-04-09-scope-prefetch-2";
   var SCOPE_CACHE_KEY = "ids-svv-scope-options-v1";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
