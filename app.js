@@ -2606,9 +2606,10 @@
       return [];
     }
 
-    return childElementsByLocalName(parent, "property").map(
+    var propertyRules = childElementsByLocalName(parent, "property").map(
       function (propertyEl) {
         return {
+          sourceType: "property",
           propertySet: textFromNested(propertyEl, [
             "propertySet",
             "simpleValue",
@@ -2619,6 +2620,23 @@
         };
       },
     );
+
+    var attributeRules = childElementsByLocalName(parent, "attribute").map(
+      function (attributeEl) {
+        return {
+          sourceType: "attribute",
+          propertySet: "@attribute",
+          baseName:
+            textFromNested(attributeEl, ["name", "simpleValue"]) ||
+            textFromNested(attributeEl, ["name"]) ||
+            "Name",
+          cardinality: attributeEl.getAttribute("cardinality") || "required",
+          valueRule: parseIdsValueRule(childByLocalName(attributeEl, "value")),
+        };
+      },
+    );
+
+    return propertyRules.concat(attributeRules);
   }
 
   function parseIdsValueRule(valueEl) {
@@ -2667,6 +2685,39 @@
         return {
           type: "pattern",
           value: patternNodes[0].getAttribute("value") || ".*",
+        };
+      }
+
+      var maxLengthNodes = restriction.getElementsByTagNameNS(
+        "http://www.w3.org/2001/XMLSchema",
+        "maxLength",
+      );
+      if (maxLengthNodes.length) {
+        return {
+          type: "maxLength",
+          value: Number(maxLengthNodes[0].getAttribute("value") || 0),
+        };
+      }
+
+      var minLengthNodes = restriction.getElementsByTagNameNS(
+        "http://www.w3.org/2001/XMLSchema",
+        "minLength",
+      );
+      if (minLengthNodes.length) {
+        return {
+          type: "minLength",
+          value: Number(minLengthNodes[0].getAttribute("value") || 0),
+        };
+      }
+
+      var lengthNodes = restriction.getElementsByTagNameNS(
+        "http://www.w3.org/2001/XMLSchema",
+        "length",
+      );
+      if (lengthNodes.length) {
+        return {
+          type: "length",
+          value: Number(lengthNodes[0].getAttribute("value") || 0),
         };
       }
     }
@@ -2816,11 +2867,7 @@
         specStatusesByName[specName].applicableObjects[objectKey] = true;
 
         spec.requirements.forEach(function (rule) {
-          var actual = getPropertyValue(
-            object,
-            rule.propertySet,
-            rule.baseName,
-          );
+          var actual = getRuleValue(object, rule);
           var outcome = evaluateRule(actual, rule);
           if (outcome.ok) {
             if (!outcome.ignored) {
@@ -2906,10 +2953,7 @@
 
   function matchesAllRules(object, rules) {
     return rules.every(function (rule) {
-      return evaluateRule(
-        getPropertyValue(object, rule.propertySet, rule.baseName),
-        rule,
-      ).ok;
+      return evaluateRule(getRuleValue(object, rule), rule).ok;
     });
   }
 
@@ -2927,7 +2971,7 @@
     }
 
     return coerceArray(spec.applicability).every(function (rule) {
-      var actual = getPropertyValue(object, rule.propertySet, rule.baseName);
+      var actual = getRuleValue(object, rule);
       if (evaluateRule(actual, rule).ok) {
         return true;
       }
@@ -3066,7 +3110,54 @@
       }
     }
 
+    if (valueRule.type === "maxLength") {
+      return actual.length <= Number(valueRule.value || 0);
+    }
+
+    if (valueRule.type === "minLength") {
+      return actual.length >= Number(valueRule.value || 0);
+    }
+
+    if (valueRule.type === "length") {
+      return actual.length === Number(valueRule.value || 0);
+    }
+
     return true;
+  }
+
+  function getRuleValue(object, rule) {
+    if (!rule) {
+      return null;
+    }
+    if (rule.sourceType === "attribute") {
+      return getAttributeValue(object, rule.baseName);
+    }
+    return getPropertyValue(object, rule.propertySet, rule.baseName);
+  }
+
+  function getAttributeValue(object, attributeName) {
+    var key = normalizeComparisonText(attributeName || "Name");
+    var attributeMap = {
+      name: firstNonEmpty([object && object.name, object && object.Name]),
+      ifcclass: firstNonEmpty([object && object.type, object && object.ifcClass]),
+      type: firstNonEmpty([object && object.type, object && object.ifcClass]),
+      guid: firstNonEmpty([
+        object && object.guid,
+        object && object.globalId,
+        object && object.ifcGuid,
+      ]),
+      id: firstNonEmpty([object && object.id, object && object.objectId]),
+    };
+
+    if (Object.prototype.hasOwnProperty.call(attributeMap, key)) {
+      return attributeMap[key];
+    }
+
+    return firstNonEmpty([
+      object && object[attributeName],
+      object && object[(attributeName || "").toLowerCase()],
+      object && object[(attributeName || "").toUpperCase()],
+    ]);
   }
 
   function getPropertyValue(object, propertySet, propertyName) {
@@ -3251,6 +3342,15 @@
     }
     if (valueRule.type === "pattern") {
       return "Matcher /" + valueRule.value + "/";
+    }
+    if (valueRule.type === "maxLength") {
+      return "Maks lengde: " + valueRule.value;
+    }
+    if (valueRule.type === "minLength") {
+      return "Min lengde: " + valueRule.value;
+    }
+    if (valueRule.type === "length") {
+      return "Lengde: " + valueRule.value;
     }
     return "Ukjent regel";
   }
