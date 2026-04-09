@@ -15,11 +15,13 @@
       connectPromise: null,
       lastConnectError: "",
       rawIfcExportVariant: "",
+      modelLayers: [],
     },
     idsText: "",
     idsName: "",
     validation: null,
     selectedScopeKey: "__all__",
+    selectedBuildingId: "",
     lastValidationSource: null,
   };
 
@@ -103,11 +105,12 @@
       "",
     );
     state.streamBim.connectPromise = window.StreamBIM.connect({})
-      .then(function () {
+      .then(async function () {
         state.streamBim.lastConnectError = "";
         state.streamBim.connected = true;
         state.streamBim.api = window.StreamBIM;
         state.streamBim.methods = listCallableMethods(window.StreamBIM);
+        await refreshModelLayerOptions();
         renderApiMethods();
         setConnectionState(
           "Tilkoblet",
@@ -116,7 +119,7 @@
         );
         return true;
       })
-      .catch(function (error) {
+      .catch(async function (error) {
         var fallbackApi = window.StreamBIM;
         var fallbackMethods = listCallableMethods(fallbackApi);
         if (hasUsableStreamBimApi(fallbackApi, fallbackMethods)) {
@@ -124,6 +127,7 @@
           state.streamBim.connected = true;
           state.streamBim.api = fallbackApi;
           state.streamBim.methods = fallbackMethods;
+          await refreshModelLayerOptions();
           renderApiMethods();
           setConnectionState(
             "Tilkoblet",
@@ -282,10 +286,14 @@
     );
 
     try {
+      await refreshModelLayerOptions();
       var specs = parseIds(state.idsText);
+      state.selectedScopeKey = getSelectedScopeKey();
+      state.selectedBuildingId = getSelectedBuildingId();
       var modelData = await fetchModelDataFromStreamBim(
         state.streamBim.api,
         specs,
+        state.selectedBuildingId,
       );
       var allObjects = coerceArray(modelData && modelData.objects);
       state.lastValidationSource = {
@@ -307,9 +315,12 @@
     }
   }
 
-  async function fetchModelDataFromStreamBim(api, specs) {
+  async function fetchModelDataFromStreamBim(api, specs, selectedBuildingId) {
     state.streamBim.methods = listCallableMethods(api);
     renderApiMethods();
+    if (selectedBuildingId) {
+      state.streamBim.searchBuildingId = String(selectedBuildingId);
+    }
 
     var diagnostics = [];
     var targeted = { objects: [], diagnostic: "" };
@@ -1218,6 +1229,7 @@
 
   function onScopeFilterChanged() {
     state.selectedScopeKey = getSelectedScopeKey();
+    state.selectedBuildingId = getSelectedBuildingId();
     if (
       !state.lastValidationSource ||
       !coerceArray(state.lastValidationSource.specs).length
@@ -1237,6 +1249,151 @@
     }
     var value = stringifyValue(els.scopeFilter.value).trim();
     return value || "__all__";
+  }
+
+  function getSelectedBuildingId() {
+    var scopeKey = getSelectedScopeKey();
+    var prefix = "__building__::";
+    if (scopeKey.indexOf(prefix) !== 0) {
+      return "";
+    }
+    return scopeKey.slice(prefix.length);
+  }
+
+  async function refreshModelLayerOptions() {
+    var api = state.streamBim && state.streamBim.api;
+    if (!api) {
+      state.streamBim.modelLayers = [];
+      return;
+    }
+    var layers = await fetchModelLayerCatalog(api);
+    state.streamBim.modelLayers = layers;
+  }
+
+  async function fetchModelLayerCatalog(api) {
+    var layers = [];
+
+    async function tryMethod(name, arg) {
+      if (!api || typeof api[name] !== "function") {
+        return [];
+      }
+      try {
+        var result = typeof arg === "undefined" ? await api[name]() : await api[name](arg);
+        return normalizeModelLayersFromResponse(result);
+      } catch (error) {
+        return [];
+      }
+    }
+
+    layers = layers.concat(await tryMethod("getBuildings"));
+    if (!layers.length) {
+      layers = layers.concat(await tryMethod("getBuildingList"));
+    }
+    if (!layers.length) {
+      layers = layers.concat(await tryMethod("getModelLayers"));
+    }
+    if (!layers.length) {
+      layers = layers.concat(await tryMethod("getLayers"));
+    }
+
+    if (!layers.length && typeof api.makeApiRequest === "function") {
+      var context = await createRawIfcApiContext(api);
+      if (context && context.apiBase) {
+        var endpoints = ["/buildings", "/buildings/export/json"];
+        for (var i = 0; i < endpoints.length; i += 1) {
+          try {
+            var response = await makeApiJsonRequest(api, {
+              url: context.apiBase + endpoints[i],
+              method: "GET",
+              accept: "application/json",
+            });
+            layers = normalizeModelLayersFromResponse(response);
+            if (layers.length) {
+              break;
+            }
+          } catch (error) {}
+        }
+      }
+    }
+
+    return dedupeModelLayers(layers);
+  }
+
+  function normalizeModelLayersFromResponse(response) {
+    if (typeof response === "string") {
+      try {
+        response = JSON.parse(response);
+      } catch (error) {
+        return [];
+      }
+    }
+    var items = [];
+    if (Array.isArray(response)) {
+      items = response;
+    } else if (response && typeof response === "object") {
+      items = firstNonEmptyArray([
+        response.data,
+        response.items,
+        response.results,
+        response.rows,
+        response.buildings,
+      ]);
+    }
+
+    return coerceArray(items)
+      .map(function (item) {
+        var id = stringifyValue(
+          pickFirst(item || {}, [
+            "id",
+            "buildingId",
+            "BuildingId",
+            "@Building Id",
+            "Building Id",
+          ]),
+        ).trim();
+        var label = firstNonEmpty([
+          pickFirst(item || {}, [
+            "name",
+            "label",
+            "title",
+            "buildingName",
+            "BuildingName",
+            "modelLayerName",
+            "ModelLayerName",
+          ]),
+          id,
+        ]);
+        if (!id) {
+          return null;
+        }
+        return { id: id, label: String(label || id) };
+      })
+      .filter(Boolean);
+  }
+
+  function dedupeModelLayers(layers) {
+    var seen = {};
+    return coerceArray(layers)
+      .filter(function (layer) {
+        var id = stringifyValue(layer && layer.id).trim();
+        if (!id || seen[id]) {
+          return false;
+        }
+        seen[id] = true;
+        return true;
+      })
+      .sort(function (a, b) {
+        return String(a.label).localeCompare(String(b.label));
+      });
+  }
+
+  function firstNonEmptyArray(candidates) {
+    for (var i = 0; i < candidates.length; i += 1) {
+      if (Array.isArray(candidates[i]) && candidates[i].length) {
+        return candidates[i];
+      }
+    }
+    return [];
   }
 
   function getSelectedScopeLabel() {
@@ -1306,9 +1463,21 @@
     }
     var previous = state.selectedScopeKey || getSelectedScopeKey();
     var options = buildScopeOptionsFromObjects(objects);
+    var layerOptions = coerceArray(state.streamBim && state.streamBim.modelLayers).map(
+      function (layer) {
+        return {
+          key: "__building__::" + stringifyValue(layer && layer.id),
+          label:
+            stringifyValue(layer && layer.id) +
+            " / " +
+            stringifyValue(layer && layer.label),
+        };
+      },
+    );
+    var allOptions = dedupeScopeOptions(layerOptions.concat(options));
     var html = ['<option value="__all__">Alle modellag</option>']
       .concat(
-        options.map(function (option) {
+        allOptions.map(function (option) {
           return (
             '<option value="' +
             escapeHtml(option.key) +
@@ -1323,16 +1492,52 @@
 
     var selectedExists =
       previous === "__all__" ||
-      options.some(function (option) {
+      allOptions.some(function (option) {
         return option.key === previous;
       });
     els.scopeFilter.value = selectedExists ? previous : "__all__";
     state.selectedScopeKey = getSelectedScopeKey();
+    state.selectedBuildingId = getSelectedBuildingId();
+  }
+
+  function dedupeScopeOptions(options) {
+    var seen = {};
+    return coerceArray(options).filter(function (option) {
+      var key = stringifyValue(option && option.key).trim();
+      if (!key || seen[key]) {
+        return false;
+      }
+      seen[key] = true;
+      return true;
+    });
   }
 
   function filterObjectsByScope(objects, scopeKey) {
     if (!scopeKey || scopeKey === "__all__") {
       return coerceArray(objects).slice();
+    }
+    if (scopeKey.indexOf("__building__::") === 0) {
+      var buildingId = scopeKey.slice("__building__::".length);
+      return coerceArray(objects).filter(function (object) {
+        return (
+          normalizeIdentityToken(
+            firstNonEmpty([
+              pickFirst(object || {}, [
+                "buildingId",
+                "BuildingId",
+                "@Building Id",
+                "Building Id",
+              ]),
+              pickFirst(object && object.raw || {}, [
+                "buildingId",
+                "BuildingId",
+                "@Building Id",
+                "Building Id",
+              ]),
+            ]),
+          ) === normalizeIdentityToken(buildingId)
+        );
+      });
     }
     return coerceArray(objects).filter(function (object) {
       return stringifyValue(object && object.scopeKey) === scopeKey;
@@ -1954,12 +2159,22 @@
       projectId = stringifyValue(await api.getProjectId()).trim();
     } catch (error) {}
 
-    try {
-      var resolvedBuildingId = stringifyValue(await api.getBuildingId()).trim();
-      if (resolvedBuildingId) {
-        buildingId = resolvedBuildingId;
-      }
-    } catch (error) {}
+    var preferred = stringifyValue(
+      firstNonEmpty([
+        state.selectedBuildingId,
+        state.streamBim && state.streamBim.searchBuildingId,
+      ]),
+    ).trim();
+    if (preferred) {
+      buildingId = preferred;
+    } else {
+      try {
+        var resolvedBuildingId = stringifyValue(await api.getBuildingId()).trim();
+        if (resolvedBuildingId) {
+          buildingId = resolvedBuildingId;
+        }
+      } catch (error) {}
+    }
 
     return {
       projectId: projectId,
