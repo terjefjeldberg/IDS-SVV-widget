@@ -3216,12 +3216,26 @@
       return false;
     }
 
-    return coerceArray(
+    var hasHint = coerceArray(
       object.idsApplicableSpecs || object._idsApplicableSpecs,
     ).some(function (name) {
       return (
         normalizeComparisonText(name) === normalizeComparisonText(spec.name)
       );
+    });
+    if (!hasHint) {
+      return false;
+    }
+
+    var entityRules = coerceArray(spec.applicability).filter(function (rule) {
+      return rule && rule.sourceType === "entity";
+    });
+    if (!entityRules.length) {
+      return true;
+    }
+
+    return entityRules.every(function (rule) {
+      return evaluateRule(getRuleValue(object, rule), rule).ok;
     });
   }
 
@@ -3571,46 +3585,43 @@
       return;
     }
 
-    if (!report || !coerceArray(report.specStatuses).length) {
+    if (!report || !coerceArray(report.scopes).length) {
       els.resultTableRoot.className = "result-table-wrap empty-state";
       els.resultTableRoot.textContent =
-        "Kjør en IDS-kontroll for å se status per spesifikasjon.";
-      return;
-    }
-
-    if (hasUnevaluatedSpecStatuses(report)) {
-      els.resultTableRoot.className = "result-table-wrap empty-state";
-      els.resultTableRoot.textContent =
-        "Status per spesifikasjon skjules så lenge det finnes saker som ikke er vurdert.";
+        "Kjor en IDS-kontroll for a se status per modellag.";
       return;
     }
 
     els.resultTableRoot.className = "result-table-wrap";
     els.resultTableRoot.innerHTML = [
-      '<div class="result-table-head">Status per spesifikasjon</div>',
+      '<div class="result-table-head">Status per modellag</div>',
       '<table class="result-table">',
       "  <thead>",
       "    <tr>",
-      "      <th>Spesifikasjon</th>",
+      "      <th>Modellag</th>",
       "      <th>Objekter evaluert</th>",
       "      <th>Avvik</th>",
       "      <th>Status</th>",
       "    </tr>",
       "  </thead>",
       "  <tbody>" +
-        report.specStatuses
-          .map(function (specStatus) {
-            var status = determineSpecStatus(specStatus);
+        report.scopes
+          .map(function (scope) {
+            var failedGroups = coerceArray(scope.groups).length;
+            var status =
+              failedGroups > 0
+                ? { label: "Avvik", className: "status-fail" }
+                : { label: "Suksess", className: "status-success" };
             return [
               "<tr>",
-              "  <td>" + escapeHtml(specStatus.specName || "-") + "</td>",
+              "  <td>" + escapeHtml(scope.scopeLabel || "-") + "</td>",
               "  <td>" +
-                String(specStatus.applicableObjectCount || 0) +
+                String((scope.summary && scope.summary.applicableObjectCount) || 0) +
                 "</td>",
-              "  <td>" + String(specStatus.failedChecks || 0) + "</td>",
+              "  <td>" + String(failedGroups) + "</td>",
               '  <td><span class="status-pill ' +
                 status.className +
-                '">' +
+                '\">' +
                 escapeHtml(status.label) +
                 "</span></td>",
               "</tr>",
@@ -5473,3 +5484,4 @@
       .replace(/'/g, "&#39;");
   }
 })();
+
