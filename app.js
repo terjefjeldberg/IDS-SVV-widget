@@ -1251,7 +1251,8 @@
 
   function buildScopeOptionsFromObjects(objects) {
     var map = {};
-    coerceArray(objects).forEach(function (object) {
+    var list = coerceArray(objects);
+    list.forEach(function (object) {
       var scopeKey = stringifyValue(object && object.scopeKey).trim();
       if (!scopeKey) {
         return;
@@ -1268,6 +1269,28 @@
         };
       }
     });
+
+    if (!Object.keys(map).length) {
+      list.forEach(function (object) {
+        var inferred = inferObjectScope(
+          object && (object.raw || object),
+          (object && object.propertySets) || {},
+        );
+        var inferredKey = stringifyValue(inferred && inferred.scopeKey).trim();
+        if (!inferredKey || inferredKey === "__default__") {
+          return;
+        }
+        if (!map[inferredKey]) {
+          map[inferredKey] = {
+            key: inferredKey,
+            label:
+              stringifyValue(inferred && inferred.scopeLabel).trim() ||
+              "Uspesifisert modellag",
+          };
+        }
+      });
+    }
+
     return Object.keys(map)
       .map(function (key) {
         return map[key];
@@ -5417,6 +5440,47 @@
   }
 
   function inferObjectScope(item, propertySets) {
+    var buildingId =
+      firstNonEmpty([
+        pickFirst(item, [
+          "buildingId",
+          "BuildingId",
+          "building",
+          "Building",
+          "@Building Id",
+          "Building Id",
+        ]),
+        findPropertyAcrossSets(propertySets, [
+          "Building Id",
+          "BuildingId",
+          "@Building Id",
+          "Building",
+          "Building Number",
+        ]),
+      ]) || "";
+
+    var buildingName =
+      firstNonEmpty([
+        pickFirst(item, [
+          "buildingName",
+          "BuildingName",
+          "buildingLabel",
+          "BuildingLabel",
+          "modelLayerName",
+          "ModelLayerName",
+          "ModelLayer",
+          "Model Layer",
+        ]),
+        findPropertyAcrossSets(propertySets, [
+          "Building Name",
+          "BuildingName",
+          "Model Layer",
+          "ModelLayer",
+          "Model Layer Name",
+          "Layer Name",
+        ]),
+      ]) || "";
+
     var modelName =
       firstNonEmpty([
         pickFirst(item, [
@@ -5431,6 +5495,8 @@
           "ModelName",
           "Model",
           "FileName",
+          "File Name",
+          "Source Model",
         ]),
         findPropertyAcrossSets(propertySets, [
           "Model",
@@ -5455,6 +5521,9 @@
           "containerName",
           "LayerName",
           "Layer",
+          "ModelLayer",
+          "Model Layer",
+          "Discipline",
         ]),
         findPropertyAcrossSets(propertySets, [
           "Layer",
@@ -5463,16 +5532,34 @@
           "Model Layer",
           "Discipline",
           "Container",
+          "Building Name",
         ]),
       ]) || "";
 
+    if (!modelName) {
+      modelName = firstNonEmpty([buildingName, buildingId]);
+    }
+    if (!layerName) {
+      layerName = firstNonEmpty([buildingName]);
+    }
+
     var labelParts = [];
-    if (modelName) {
+    if (buildingId && modelName) {
+      labelParts.push(buildingId);
+      if (
+        normalizeComparisonText(modelName) !== normalizeComparisonText(buildingId)
+      ) {
+        labelParts.push(modelName);
+      }
+    } else if (modelName) {
       labelParts.push(modelName);
+    } else if (buildingId) {
+      labelParts.push(buildingId);
     }
     if (
       layerName &&
-      normalizeComparisonText(layerName) !== normalizeComparisonText(modelName)
+      normalizeComparisonText(layerName) !== normalizeComparisonText(modelName) &&
+      normalizeComparisonText(layerName) !== normalizeComparisonText(buildingId)
     ) {
       labelParts.push(layerName);
     }
