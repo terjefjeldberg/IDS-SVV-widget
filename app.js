@@ -2078,6 +2078,30 @@
 
       var propertySets = extractPropertySets(item);
       var scope = inferObjectScope(item, propertySets);
+      var inferredType = firstNonEmpty([
+        pickFirst(item, [
+          "ifcClass",
+          "type",
+          "entity",
+          "className",
+          "category",
+          "IfcClass",
+          "ifcType",
+          "ifcEntity",
+          "Entity",
+          "Type",
+          "objectType",
+          "ObjectType",
+        ]),
+        findPropertyAcrossSets(propertySets, [
+          "IfcClass",
+          "IFC Class",
+          "Ifc Class",
+          "Entity",
+          "Type",
+          "Class",
+        ]),
+      ]);
       haveProperties = haveProperties || Object.keys(propertySets).length > 0;
 
       objects.push({
@@ -2091,15 +2115,7 @@
           pickFirst(item, ["guid", "globalId", "ifcGuid"]) ||
           "Objekt " + (index + 1),
         description: pickFirst(item, ["description", "Description"]),
-        type:
-          pickFirst(item, [
-            "ifcClass",
-            "type",
-            "entity",
-            "className",
-            "category",
-            "IfcClass",
-          ]) || "Ukjent type",
+        type: inferredType || "Ukjent type",
         modelName: scope.modelName,
         layerName: scope.layerName,
         scopeKey: scope.scopeKey,
@@ -2803,23 +2819,39 @@
       },
     );
 
-    var entityRules = childElementsByLocalName(parent, "entity").map(
-      function (entityEl) {
-        var entityName = textFromNested(entityEl, ["name", "simpleValue"]);
-        if (!entityName) {
-          entityName = textFromNested(entityEl, ["name"]);
-        }
-        return {
-          sourceType: "entity",
-          propertySet: "@entity",
-          baseName: "IfcClass",
+    var entityRules = [];
+    childElementsByLocalName(parent, "entity").forEach(function (entityEl) {
+      var entityName = textFromNested(entityEl, ["name", "simpleValue"]);
+      if (!entityName) {
+        entityName = textFromNested(entityEl, ["name"]);
+      }
+      entityRules.push({
+        sourceType: "entity",
+        propertySet: "@entity",
+        baseName: "IfcClass",
+        cardinality: entityEl.getAttribute("cardinality") || "required",
+        valueRule: entityName
+          ? { type: "equals", value: entityName }
+          : { type: "any" },
+      });
+
+      var predefinedType = textFromNested(entityEl, [
+        "predefinedType",
+        "simpleValue",
+      ]);
+      if (!predefinedType) {
+        predefinedType = textFromNested(entityEl, ["predefinedType"]);
+      }
+      if (predefinedType) {
+        entityRules.push({
+          sourceType: "attribute",
+          propertySet: "@attribute",
+          baseName: "PredefinedType",
           cardinality: entityEl.getAttribute("cardinality") || "required",
-          valueRule: entityName
-            ? { type: "equals", value: entityName }
-            : { type: "any" },
-        };
-      },
-    );
+          valueRule: { type: "equals", value: predefinedType },
+        });
+      }
+    });
 
     return propertyRules.concat(attributeRules, entityRules);
   }
@@ -3246,9 +3278,10 @@
       String(actualValue).trim() !== "";
     var matches = matchValueRule(actualValue, rule.valueRule);
 
-    // Only value mismatches should be reported as deviations. Missing
-    // properties are ignored for validation reporting.
     if (!hasValue) {
+      if (rule.cardinality === "required") {
+        return { ok: false, reasonCode: "missing-required" };
+      }
       return { ok: true, ignored: true, reasonCode: "missing-ignored" };
     }
 
@@ -3333,6 +3366,17 @@
         object && object.type,
         object && object.ifcClass,
         object && object.entity,
+        object && object.raw && object.raw.ifcClass,
+        object && object.raw && object.raw.entity,
+        object && object.raw && object.raw.IfcClass,
+        findPropertyAcrossSets((object && object.propertySets) || {}, [
+          "IfcClass",
+          "IFC Class",
+          "Ifc Class",
+          "Entity",
+          "Type",
+          "Class",
+        ]),
       ]);
     }
     if (rule.sourceType === "attribute") {
@@ -3351,6 +3395,19 @@
       ]),
       ifcclass: firstNonEmpty([object && object.type, object && object.ifcClass]),
       type: firstNonEmpty([object && object.type, object && object.ifcClass]),
+      predefinedtype: firstNonEmpty([
+        object && object.predefinedType,
+        object && object.PredefinedType,
+        object && object.raw && object.raw.predefinedType,
+        object && object.raw && object.raw.PredefinedType,
+        findPropertyAcrossSets((object && object.propertySets) || {}, [
+          "PredefinedType",
+          "Predefined Type",
+          "ObjectType",
+          "Object Type",
+          "Type",
+        ]),
+      ]),
       guid: firstNonEmpty([
         object && object.guid,
         object && object.globalId,
