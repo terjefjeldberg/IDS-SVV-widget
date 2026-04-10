@@ -487,19 +487,34 @@
   }
 
   function decodeIfcEscapes(text) {
-    return String(text || "").replace(
+    var decoded = String(text || "");
+
+    // IFC SPF legacy escape: \S\X means ISO-8859-1 char where code = ASCII(X)+128.
+    // Example: \S\v -> ö
+    decoded = decoded.replace(/\\S\\(.)/g, function (_, ch) {
+      var code = ch && ch.charCodeAt ? ch.charCodeAt(0) : 0;
+      if (!code) {
+        return _;
+      }
+      return String.fromCharCode(code + 128);
+    });
+
+    // IFC unicode escape block: \X2\hhhh....\X0\
+    decoded = decoded.replace(
       /\\X2\\([0-9A-Fa-f]+)\\X0\\/g,
       function (_, hexSequence) {
-        var decoded = "";
+        var unicode = "";
         for (var i = 0; i + 3 < hexSequence.length; i += 4) {
           var code = parseInt(hexSequence.slice(i, i + 4), 16);
           if (isFinite(code)) {
-            decoded += String.fromCharCode(code);
+            unicode += String.fromCharCode(code);
           }
         }
-        return decoded;
+        return unicode;
       },
     );
+
+    return decoded;
   }
 
   function isLikelyIfcGuid(value) {
