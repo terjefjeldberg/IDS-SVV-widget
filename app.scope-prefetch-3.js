@@ -2854,8 +2854,14 @@
     var key = normalizeComparisonText(modelName) || "unknown";
     var inferred = inferProjectMetadataFromObjects(objectList);
 
-    // Avoid false green checks when we cannot read real IfcProject metadata.
-    var projectName = inferred && inferred.name ? inferred.name : "";
+    // Prefer inferred project metadata, but avoid empty Name on synthetic IfcProject.
+    var projectName = firstNonEmpty([
+      inferred && inferred.name,
+      inferred && inferred.description,
+      representative && representative.modelName,
+      representative && representative.scopeLabel,
+      "",
+    ]);
     var projectDescription =
       (inferred && inferred.description) ||
       firstNonEmpty([representative && representative.description, modelName]);
@@ -2863,7 +2869,7 @@
     var synthetic = {
       id: "synthetic-ifcproject::" + key,
       guid: "",
-      name: projectName,
+      name: projectName || "Ukjent prosjekt",
       description: projectDescription,
       type: "IFCPROJECT",
       modelName: modelName,
@@ -2875,7 +2881,7 @@
         firstNonEmpty([representative && representative.scopeLabel]) || modelName,
       propertySets: {
         "__attributes__": {
-          Name: projectName,
+          Name: projectName || "Ukjent prosjekt",
           Description: projectDescription,
         },
       },
@@ -2883,7 +2889,7 @@
       raw: {
         synthetic: true,
         type: "IFCPROJECT",
-        Name: projectName,
+        Name: projectName || "Ukjent prosjekt",
         Description: projectDescription,
       },
     };
@@ -2902,6 +2908,10 @@
       "ProjectName",
       "project",
       "Project",
+      "name",
+      "Name",
+      "displayName",
+      "DisplayName",
       "ifcProjectName",
       "IfcProjectName",
       "projectLongName",
@@ -2915,6 +2925,8 @@
     var descriptionFields = [
       "projectDescription",
       "ProjectDescription",
+      "description",
+      "Description",
       "ifcProjectDescription",
       "IfcProjectDescription",
       "projectLongDescription",
@@ -2923,6 +2935,7 @@
     var namePsetFields = [
       "ProjectName",
       "Project Name",
+      "Name",
       "IfcProjectName",
       "Ifc Project Name",
       "IfcProject",
@@ -2933,37 +2946,69 @@
     var descriptionPsetFields = [
       "ProjectDescription",
       "Project Description",
+      "Description",
       "IfcProjectDescription",
       "Ifc Project Description",
       "Long Description",
     ];
 
+    var preferredIfcTypes = {
+      ifcproject: true,
+      ifcsite: true,
+      ifcfacility: true,
+      ifcbridge: true,
+      ifcspatialelement: true,
+      ifcspatialstructureelement: true,
+    };
+
     var bestName = "";
     var bestDescription = "";
-    for (var i = 0; i < objectList.length; i += 1) {
-      var object = objectList[i] || {};
-      var raw = object.raw || object;
+    function tryInferFromList(list) {
+      for (var i = 0; i < list.length; i += 1) {
+        var object = list[i] || {};
+        var raw = object.raw || object;
 
-      if (!bestName) {
-        bestName = firstNonEmpty([
-          pickFirst(raw, nameFields),
-          findPropertyAcrossSets(object.propertySets || {}, namePsetFields),
-        ]);
-      }
+        if (!bestName) {
+          bestName = firstNonEmpty([
+            pickFirst(raw, nameFields),
+            findPropertyAcrossSets(object.propertySets || {}, namePsetFields),
+          ]);
+        }
 
-      if (!bestDescription) {
-        bestDescription = firstNonEmpty([
-          pickFirst(raw, descriptionFields),
-          findPropertyAcrossSets(
-            object.propertySets || {},
-            descriptionPsetFields,
-          ),
-        ]);
-      }
+        if (!bestDescription) {
+          bestDescription = firstNonEmpty([
+            pickFirst(raw, descriptionFields),
+            findPropertyAcrossSets(
+              object.propertySets || {},
+              descriptionPsetFields,
+            ),
+          ]);
+        }
 
-      if (bestName && bestDescription) {
-        break;
+        if (bestName && bestDescription) {
+          return;
+        }
       }
+    }
+
+    var prioritized = objectList.filter(function (object) {
+      var ifcType = normalizeComparisonText(
+        firstNonEmpty([
+          object && object.type,
+          object && object.ifcClass,
+          object && object.raw && object.raw.ifcClass,
+          object && object.raw && object.raw.type,
+        ]),
+      );
+      return !!preferredIfcTypes[ifcType];
+    });
+
+    if (prioritized.length) {
+      tryInferFromList(prioritized);
+    }
+
+    if (!bestName || !bestDescription) {
+      tryInferFromList(objectList);
     }
 
     return {
@@ -5707,7 +5752,7 @@
   }
 
   function resolveObjectIdentifier(object) {
-    return String(
+    var id = String(
       firstNonEmpty([
         object && object.guid,
         object && object.objectGuid,
@@ -5717,6 +5762,11 @@
         object && object.objectId,
       ]) || "",
     ).trim();
+
+    if (id.indexOf("synthetic-ifcproject::") === 0) {
+      return "";
+    }
+    return id;
   }
 
   function setRunStatus(message, className) {
