@@ -26,6 +26,11 @@
     lastValidationSource: null,
     scopeCatalogLoaded: false,
     scopeCatalogPromise: null,
+    dataSource: "streambim",
+    localIfc: {
+      files: [],
+      objects: [],
+    },
   };
 
   var els = {};
@@ -48,6 +53,10 @@
     els.apiMethods = byId("api-methods");
     els.idsFile = byId("ids-file");
     els.idsFileName = byId("ids-file-name");
+    els.dataSource = byId("data-source");
+    els.ifcUploadZone = byId("ifc-upload-zone");
+    els.ifcFile = byId("ifc-file");
+    els.ifcFileName = byId("ifc-file-name");
     els.loadSampleBtn = byId("load-sample-btn");
     els.validateBtn = byId("validate-btn");
     els.scopeFilter = byId("scope-filter");
@@ -56,6 +65,7 @@
     els.metricSpecs = byId("metric-specs");
     els.metricGroups = byId("metric-groups");
     els.runStatus = byId("run-status");
+    els.dataSourceNote = byId("data-source-note");
     els.resultTableRoot = byId("result-table-root");
     els.propertyDebugRoot = byId("property-debug-root");
     els.groupsRoot = byId("groups-root");
@@ -73,6 +83,12 @@
 
   function bindEvents() {
     els.idsFile.addEventListener("change", onIdsFileSelected);
+    if (els.dataSource) {
+      els.dataSource.addEventListener("change", onDataSourceChanged);
+    }
+    if (els.ifcFile) {
+      els.ifcFile.addEventListener("change", onIfcFilesSelected);
+    }
     els.loadSampleBtn.addEventListener("click", loadSampleIds);
     els.validateBtn.addEventListener("click", runValidation);
     if (els.scopeFilter) {
@@ -88,6 +104,27 @@
     }
     if (els.propertyDebugRoot) {
       els.propertyDebugRoot.addEventListener("click", onObjectActionClick);
+    }
+    onDataSourceChanged();
+  }
+
+  function onDataSourceChanged() {
+    state.dataSource =
+      (els.dataSource && stringifyValue(els.dataSource.value)) || "streambim";
+    var isLocalIfc = state.dataSource === "local-ifc";
+    if (els.ifcUploadZone) {
+      els.ifcUploadZone.classList.toggle("hidden", !isLocalIfc);
+    }
+    if (els.scopeFilter) {
+      els.scopeFilter.disabled = isLocalIfc;
+      if (isLocalIfc) {
+        els.scopeFilter.value = "__all__";
+      }
+    }
+    if (els.dataSourceNote) {
+      els.dataSourceNote.textContent = isLocalIfc
+        ? "Lokal IFC brukes som valideringsgrunnlag. Gå til objekt/BCF virker kun for rader med GUID som finnes i StreamBIM."
+        : "IFC-data hentes fra StreamBIM. Hvis widgeten ikke finner riktige API-metoder automatisk, må adapteren justeres videre for den aktuelle instansen.";
     }
   }
 
@@ -265,49 +302,273 @@
       });
   }
 
+  function onIfcFilesSelected(event) {
+    var files = Array.prototype.slice.call(
+      (event && event.target && event.target.files) || [],
+    ).filter(function (file) {
+      return !!file;
+    });
+    if (!files.length) {
+      state.localIfc.files = [];
+      state.localIfc.objects = [];
+      if (els.ifcFileName) {
+        els.ifcFileName.textContent = "Ingen IFC-fil valgt";
+      }
+      return;
+    }
+
+    Promise.all(
+      files.map(function (file) {
+        return readTextFile(file).then(function (text) {
+          return {
+            fileName: file.name,
+            text: text,
+          };
+        });
+      }),
+    )
+      .then(function (loaded) {
+        var objects = [];
+        loaded.forEach(function (entry) {
+          objects = objects.concat(parseIfcTextToObjects(entry.fileName, entry.text));
+        });
+
+        state.localIfc.files = files.map(function (file) {
+          return file.name;
+        });
+        state.localIfc.objects = objects;
+        if (els.ifcFileName) {
+          var label =
+            state.localIfc.files.length === 1
+              ? state.localIfc.files[0]
+              : state.localIfc.files.length + " IFC-filer lastet";
+          els.ifcFileName.textContent = label;
+        }
+        setRunStatus(
+          "IFC lastet: " +
+            state.localIfc.files.length +
+            " fil(er), " +
+            objects.length +
+            " objekter lest.",
+          "state-ok",
+        );
+      })
+      .catch(function (error) {
+        state.localIfc.files = [];
+        state.localIfc.objects = [];
+        if (els.ifcFileName) {
+          els.ifcFileName.textContent = "Ingen IFC-fil valgt";
+        }
+        setRunStatus(
+          "Kunne ikke lese IFC-fil(er): " + getErrorMessage(error),
+          "state-error",
+        );
+      });
+  }
+
+  function parseIfcTextToObjects(fileName, text) {
+    var objects = [];
+    var source = String(text || "");
+    var modelName = String(fileName || "IFC");
+    var scopeKey = normalizeComparisonText(modelName) || "local-ifc";
+    var scopeLabel = modelName;
+    var regex = /#(\d+)\s*=\s*(IFC[A-Z0-9_]+)\s*\(([\s\S]*?)\)\s*;/gi;
+    var match;
+    var count = 0;
+
+    while ((match = regex.exec(source))) {
+      count += 1;
+      var entityId = "#" + match[1];
+      var ifcClass = String(match[2] || "").toUpperCase();
+      var args = splitIfcArguments(match[3] || "");
+      var guid = parseIfcSimpleString(args[0] || "");
+      var name = parseIfcSimpleString(args[2] || "");
+      var description = parseIfcSimpleString(args[3] || "");
+      var predefinedType = parseIfcSimpleString(args[4] || "");
+      var displayName = name || guid || entityId;
+
+      if (ifcClass.indexOf("IFC") !== 0) {
+        continue;
+      }
+
+      objects.push({
+        id: entityId,
+        guid: isLikelyIfcGuid(guid) ? guid : "",
+        name: displayName,
+        description: description,
+        type: ifcClass,
+        ifcClass: ifcClass,
+        modelName: modelName,
+        layerName: modelName,
+        scopeKey: scopeKey,
+        scopeLabel: scopeLabel,
+        propertySets: {
+          "__attributes__": {
+            Name: name,
+            Description: description,
+            PredefinedType: predefinedType,
+          },
+        },
+        raw: {
+          id: entityId,
+          ifcClass: ifcClass,
+          GUID: guid,
+          Name: name,
+          Description: description,
+          PredefinedType: predefinedType,
+          sourceFile: modelName,
+        },
+      });
+    }
+
+    if (!count) {
+      throw new Error(
+        "Fant ingen IFC-objekter i " + modelName + ". Sjekk at filen er IFC STEP-format.",
+      );
+    }
+
+    return objects;
+  }
+
+  function splitIfcArguments(input) {
+    var text = String(input || "");
+    var out = [];
+    var token = "";
+    var level = 0;
+    var inString = false;
+
+    for (var i = 0; i < text.length; i += 1) {
+      var char = text[i];
+      var next = text[i + 1];
+
+      if (char === "'") {
+        token += char;
+        if (inString && next === "'") {
+          token += next;
+          i += 1;
+          continue;
+        }
+        inString = !inString;
+        continue;
+      }
+      if (!inString && char === "(") {
+        level += 1;
+        token += char;
+        continue;
+      }
+      if (!inString && char === ")") {
+        level = Math.max(0, level - 1);
+        token += char;
+        continue;
+      }
+      if (!inString && level === 0 && char === ",") {
+        out.push(token.trim());
+        token = "";
+        continue;
+      }
+      token += char;
+    }
+
+    if (token.trim() !== "") {
+      out.push(token.trim());
+    }
+    return out;
+  }
+
+  function parseIfcSimpleString(value) {
+    var text = String(value || "").trim();
+    if (!text || text === "$" || text === "*") {
+      return "";
+    }
+    if (text.charAt(0) === "'" && text.charAt(text.length - 1) === "'") {
+      text = text.slice(1, -1).replace(/''/g, "'");
+    }
+    return decodeIfcEscapes(text);
+  }
+
+  function decodeIfcEscapes(text) {
+    return String(text || "").replace(
+      /\\X2\\([0-9A-Fa-f]+)\\X0\\/g,
+      function (_, hexSequence) {
+        var decoded = "";
+        for (var i = 0; i + 3 < hexSequence.length; i += 4) {
+          var code = parseInt(hexSequence.slice(i, i + 4), 16);
+          if (isFinite(code)) {
+            decoded += String.fromCharCode(code);
+          }
+        }
+        return decoded;
+      },
+    );
+  }
+
+  function isLikelyIfcGuid(value) {
+    return /^[0-9A-Za-z_$]{22}$/.test(String(value || "").trim());
+  }
+
   async function runValidation() {
     if (!state.idsText) {
       setRunStatus("Velg eller last inn en IDS-fil først.", "state-warn");
       return;
     }
-    if (!state.streamBim.connected || !state.streamBim.api) {
-      var connected = await connectToStreamBim();
-      if (!connected || !state.streamBim.connected || !state.streamBim.api) {
-        var connectDetails = state.streamBim.lastConnectError
-          ? " (" + state.streamBim.lastConnectError + ")"
-          : "";
-        setRunStatus(
-          "Widgeten er ikke koblet til StreamBIM. Kj\u00f8r den inne i StreamBIM for \u00e5 hente IFC-data." +
-            connectDetails,
-          "state-error",
-        );
-        return;
-      }
-    }
-    await ensureScopeCatalogLoaded();
-
     toggleBusy(true);
+    var usingLocalIfc = state.dataSource === "local-ifc";
     setRunStatus(
-      "Henter modell-data fra StreamBIM og validerer mot IDS...",
+      usingLocalIfc
+        ? "Validerer IDS mot lokalt opplastet IFC..."
+        : "Henter modell-data fra StreamBIM og validerer mot IDS...",
       "",
     );
 
     try {
-      await refreshModelLayerOptions();
       var specs = parseIds(state.idsText);
-      state.selectedScopeKey = getSelectedScopeKey();
-      state.selectedBuildingId = getSelectedBuildingId();
-      var modelData = await fetchModelDataFromStreamBim(
-        state.streamBim.api,
-        specs,
-        state.selectedBuildingId,
-      );
-      var allObjects = coerceArray(modelData && modelData.objects);
+      var allObjects = [];
+
+      if (usingLocalIfc) {
+        if (!coerceArray(state.localIfc.objects).length) {
+          throw new Error(
+            "Ingen IFC-data lastet. Velg minst én IFC-fil før du kjører kontroll.",
+          );
+        }
+        allObjects = coerceArray(state.localIfc.objects);
+        state.selectedScopeKey = "__all__";
+        state.selectedBuildingId = "";
+      } else {
+        if (!state.streamBim.connected || !state.streamBim.api) {
+          var connected = await connectToStreamBim();
+          if (!connected || !state.streamBim.connected || !state.streamBim.api) {
+            var connectDetails = state.streamBim.lastConnectError
+              ? " (" + state.streamBim.lastConnectError + ")"
+              : "";
+            throw new Error(
+              "Widgeten er ikke koblet til StreamBIM. Kjør den inne i StreamBIM for å hente IFC-data." +
+                connectDetails,
+            );
+          }
+        }
+        await ensureScopeCatalogLoaded();
+        await refreshModelLayerOptions();
+        state.selectedScopeKey = getSelectedScopeKey();
+        state.selectedBuildingId = getSelectedBuildingId();
+        var modelData = await fetchModelDataFromStreamBim(
+          state.streamBim.api,
+          specs,
+          state.selectedBuildingId,
+        );
+        allObjects = coerceArray(modelData && modelData.objects);
+      }
+
       state.lastValidationSource = {
         specs: specs,
         objects: allObjects,
       };
-      syncScopeFilterOptions(allObjects);
+      if (!usingLocalIfc) {
+        syncScopeFilterOptions(allObjects);
+      } else if (els.scopeFilter) {
+        els.scopeFilter.innerHTML =
+          '<option value="__all__">Alle opplastede IFC-filer</option>';
+        els.scopeFilter.value = "__all__";
+      }
       renderValidationForSelectedScope(specs, allObjects);
     } catch (error) {
       state.validation = null;
@@ -5752,6 +6013,18 @@
   }
 
   function resolveObjectIdentifier(object) {
+    if (state.dataSource === "local-ifc") {
+      var localGuid = String(
+        firstNonEmpty([
+          object && object.guid,
+          object && object.objectGuid,
+          object && object.globalId,
+          object && object.ifcGuid,
+        ]) || "",
+      ).trim();
+      return isLikelyIfcGuid(localGuid) ? localGuid : "";
+    }
+
     var id = String(
       firstNonEmpty([
         object && object.guid,

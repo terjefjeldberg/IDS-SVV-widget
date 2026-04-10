@@ -159,6 +159,10 @@ input {
         box-shadow 180ms ease;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .upload-zone:hover {
     transform: translateY(-1px);
     border-color: var(--brand);

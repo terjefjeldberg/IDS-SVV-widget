@@ -47,6 +47,35 @@
                     </label>
 
                     <div class="filter-row">
+                        <label class="filter-label" for="data-source"
+                            >Datakilde</label
+                        >
+                        <select id="data-source" class="scope-filter">
+                            <option value="streambim" selected>StreamBIM</option>
+                            <option value="local-ifc">Lokal IFC</option>
+                        </select>
+                    </div>
+
+                    <label
+                        class="upload-zone hidden"
+                        id="ifc-upload-zone"
+                        for="ifc-file"
+                    >
+                        <input
+                            id="ifc-file"
+                            type="file"
+                            accept=".ifc"
+                            multiple
+                        />
+                        <span class="upload-label"
+                            >Slipp IFC-fil(er) her eller velg fra disk</span
+                        >
+                        <span id="ifc-file-name" class="upload-meta">
+                            Ingen IFC-fil valgt
+                        </span>
+                    </label>
+
+                    <div class="filter-row">
                         <label class="filter-label" for="scope-filter"
                             >Modellag</label
                         >
@@ -72,7 +101,7 @@
                         </button>
                     </div>
 
-                    <div class="inline-note">
+                    <div class="inline-note" id="data-source-note">
                         IFC-data hentes fra StreamBIM. Hvis widgeten ikke finner
                         riktige API-metoder automatisk, må adapteren justeres
                         videre for den aktuelle instansen.
