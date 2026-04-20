@@ -3949,6 +3949,7 @@
   }
 
   function parseIds(xmlText) {
+    xmlText = normalizeIdsXmlText(xmlText);
     var parser = new DOMParser();
     var xml = parser.parseFromString(xmlText, "application/xml");
     var parserError = xml.querySelector("parsererror");
@@ -3970,6 +3971,19 @@
         requirements: parseIdsRules(childByLocalName(specEl, "requirements")),
       };
     });
+  }
+
+  function normalizeIdsXmlText(xmlText) {
+    var text = String(xmlText || "");
+    // Repair common UTF-8/latin1 mojibake directly in IDS payload before XML parse.
+    // This ensures rule keys such as AntallRør_10840 are parsed correctly.
+    return text
+      .replace(/\u00c3\u00a6/g, "\u00e6")
+      .replace(/\u00c3\u00b8/g, "\u00f8")
+      .replace(/\u00c3\u00a5/g, "\u00e5")
+      .replace(/\u00c3\u2020/g, "\u00c6")
+      .replace(/\u00c3\u02dc/g, "\u00d8")
+      .replace(/\u00c3\u2026/g, "\u00c5");
   }
 
   function parseIdsRules(parent) {
