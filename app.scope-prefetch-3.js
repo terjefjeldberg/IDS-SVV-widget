@@ -381,6 +381,8 @@
     var propertyById = {};
     var propertySetById = {};
     var relatesByProps = [];
+    var typePropertySetsByTypeId = {};
+    var relatesByType = [];
 
     while ((match = regex.exec(source))) {
       count += 1;
@@ -421,6 +423,24 @@
             relatedRefs: parseIfcReferenceList(args[4] || ""),
             relatingRef: parseIfcReference(args[5] || ""),
           });
+        } else if (ifcClass === "IFCRELDEFINESBYTYPE") {
+          relatesByType.push({
+            relatedRefs: parseIfcReferenceList(args[4] || ""),
+            relatingTypeRef: parseIfcReference(args[5] || ""),
+          });
+        } else if (/IFC.*TYPE/i.test(ifcClass)) {
+          // Collect psets referenced on type objects. Different IFC subtypes place
+          // HasPropertySets on different argument positions, so inspect all refs.
+          var refs = [];
+          for (var a = 0; a < args.length; a += 1) {
+            refs = refs.concat(parseIfcReferenceList(args[a] || ""));
+          }
+          var psetRefs = refs.filter(function (ref) {
+            return !!propertySetById[ref];
+          });
+          if (psetRefs.length) {
+            typePropertySetsByTypeId[entityId] = uniqueStrings(psetRefs);
+          }
         }
         return;
       }
@@ -479,6 +499,39 @@
             prop.name,
             prop.value,
           );
+        });
+      });
+    });
+
+    // Attach Pset properties inherited via object type (IfcRelDefinesByType).
+    relatesByType.forEach(function (rel) {
+      var typePsets = coerceArray(typePropertySetsByTypeId[rel.relatingTypeRef]);
+      if (!typePsets.length) {
+        return;
+      }
+
+      rel.relatedRefs.forEach(function (objectRef) {
+        var object = objectByEntityId[objectRef];
+        if (!object) {
+          return;
+        }
+        typePsets.forEach(function (psetRef) {
+          var pset = propertySetById[psetRef];
+          if (!pset || !pset.refs.length) {
+            return;
+          }
+          pset.refs.forEach(function (propRef) {
+            var prop = propertyById[propRef];
+            if (!prop || !prop.name) {
+              return;
+            }
+            assignPropertyValue(
+              object.propertySets,
+              pset.name || "UkjentPset",
+              prop.name,
+              prop.value,
+            );
+          });
         });
       });
     });
