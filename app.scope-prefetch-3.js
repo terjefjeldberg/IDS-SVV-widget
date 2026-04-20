@@ -3977,13 +3977,25 @@
     var text = String(xmlText || "");
     // Repair common UTF-8/latin1 mojibake directly in IDS payload before XML parse.
     // This ensures rule keys such as AntallRør_10840 are parsed correctly.
-    return text
+    text = text
       .replace(/\u00c3\u00a6/g, "\u00e6")
       .replace(/\u00c3\u00b8/g, "\u00f8")
       .replace(/\u00c3\u00a5/g, "\u00e5")
       .replace(/\u00c3\u2020/g, "\u00c6")
       .replace(/\u00c3\u02dc/g, "\u00d8")
       .replace(/\u00c3\u2026/g, "\u00c5");
+
+    // Broader fallback: if text still looks mojibake, attempt latin1->utf8 re-decode.
+    // Example: "AntallRÃ¸r" -> "AntallRør"
+    if (/[ÃÂâ][\s\S]/.test(text)) {
+      try {
+        text = decodeURIComponent(escape(text));
+      } catch (error) {
+        // Keep best-effort repaired text.
+      }
+    }
+
+    return text;
   }
 
   function parseIdsRules(parent) {
