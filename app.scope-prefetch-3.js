@@ -5,6 +5,7 @@
   var IDS_NS = "http://standards.buildingsmart.org/IDS";
   var BUILD_ID = "2026-04-09-scope-prefetch-4";
   var SCOPE_CACHE_KEY = "ids-svv-scope-options-v2";
+  var IFCTESTER_SERVICE_URL = "http://127.0.0.1:8765/validate";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -29,6 +30,7 @@
     dataSource: "streambim",
     localIfc: {
       files: [],
+      fileBlobs: [],
       objects: [],
     },
   };
@@ -123,7 +125,9 @@
     }
     if (els.dataSourceNote) {
       els.dataSourceNote.textContent = isLocalIfc
-        ? "Lokal IFC brukes som valideringsgrunnlag. Gå til objekt/BCF virker kun for rader med GUID som finnes i StreamBIM."
+        ? "Lokal IFC valideres via IfcTester-tjeneste på " +
+          IFCTESTER_SERVICE_URL +
+          ". Gå til objekt/BCF virker kun for rader med GUID som finnes i StreamBIM."
         : "IFC-data hentes fra StreamBIM. Hvis widgeten ikke finner riktige API-metoder automatisk, må adapteren justeres videre for den aktuelle instansen.";
     }
   }
@@ -310,60 +314,29 @@
     });
     if (!files.length) {
       state.localIfc.files = [];
+      state.localIfc.fileBlobs = [];
       state.localIfc.objects = [];
       if (els.ifcFileName) {
         els.ifcFileName.textContent = "Ingen IFC-fil valgt";
       }
       return;
     }
-
-    Promise.all(
-      files.map(function (file) {
-        return readTextFile(file).then(function (text) {
-          return {
-            fileName: file.name,
-            text: text,
-          };
-        });
-      }),
-    )
-      .then(function (loaded) {
-        var objects = [];
-        loaded.forEach(function (entry) {
-          objects = objects.concat(parseIfcTextToObjects(entry.fileName, entry.text));
-        });
-
-        state.localIfc.files = files.map(function (file) {
-          return file.name;
-        });
-        state.localIfc.objects = objects;
-        if (els.ifcFileName) {
-          var label =
-            state.localIfc.files.length === 1
-              ? state.localIfc.files[0]
-              : state.localIfc.files.length + " IFC-filer lastet";
-          els.ifcFileName.textContent = label;
-        }
-        setRunStatus(
-          "IFC lastet: " +
-            state.localIfc.files.length +
-            " fil(er), " +
-            objects.length +
-            " objekter lest.",
-          "state-ok",
-        );
-      })
-      .catch(function (error) {
-        state.localIfc.files = [];
-        state.localIfc.objects = [];
-        if (els.ifcFileName) {
-          els.ifcFileName.textContent = "Ingen IFC-fil valgt";
-        }
-        setRunStatus(
-          "Kunne ikke lese IFC-fil(er): " + getErrorMessage(error),
-          "state-error",
-        );
-      });
+    state.localIfc.files = files.map(function (file) {
+      return file.name;
+    });
+    state.localIfc.fileBlobs = files.slice();
+    state.localIfc.objects = [];
+    if (els.ifcFileName) {
+      var label =
+        state.localIfc.files.length === 1
+          ? state.localIfc.files[0]
+          : state.localIfc.files.length + " IFC-filer valgt";
+      els.ifcFileName.textContent = label;
+    }
+    setRunStatus(
+      "IFC klar: " + state.localIfc.files.length + " fil(er) valgt for IfcTester-kjøring.",
+      "state-ok",
+    );
   }
 
   function parseIfcTextToObjects(fileName, text) {
@@ -681,19 +654,35 @@
     );
 
     try {
-      var specs = parseIds(state.idsText);
       var allObjects = [];
 
       if (usingLocalIfc) {
-        if (!coerceArray(state.localIfc.objects).length) {
+        if (!coerceArray(state.localIfc.fileBlobs).length) {
           throw new Error(
             "Ingen IFC-data lastet. Velg minst én IFC-fil før du kjører kontroll.",
           );
         }
-        allObjects = coerceArray(state.localIfc.objects);
-        state.selectedScopeKey = "__all__";
-        state.selectedBuildingId = "";
+        var thirdParty = await validateWithIfcTesterService(
+          state.idsName || "validation.ids",
+          state.idsText,
+          state.localIfc.fileBlobs,
+        );
+        var thirdPartyReport = buildWidgetReportFromIfcTester(thirdParty);
+        state.validation = thirdPartyReport;
+        state.lastValidationSource = null;
+        renderSummary(thirdPartyReport);
+        renderResultTable(thirdPartyReport);
+        renderPropertyDebug([], []);
+        renderGroups(thirdPartyReport);
+        setRunStatus(
+          thirdPartyReport.groups.length
+            ? "IfcTester-validering ferdig. Se detaljer under Avvik."
+            : "IfcTester-validering ferdig. Ingen avvik funnet.",
+          thirdPartyReport.groups.length ? "state-warn" : "state-ok",
+        );
+        return;
       } else {
+        var specs = parseIds(state.idsText);
         if (!state.streamBim.connected || !state.streamBim.api) {
           var connected = await connectToStreamBim();
           if (!connected || !state.streamBim.connected || !state.streamBim.api) {
@@ -1657,6 +1646,200 @@
     return uniqueStrings(keys.concat(propertyNameVariants, aliasKeys)).filter(
       Boolean,
     );
+  }
+
+  async function validateWithIfcTesterService(idsName, idsText, ifcFiles) {
+    var form = new FormData();
+    var idsBlob = new Blob([idsText], { type: "application/xml" });
+    form.append("ids_file", idsBlob, idsName || "validation.ids");
+    coerceArray(ifcFiles).forEach(function (file, index) {
+      form.append("ifc_files", file, (file && file.name) || "model-" + (index + 1) + ".ifc");
+    });
+
+    var response;
+    try {
+      response = await fetch(IFCTESTER_SERVICE_URL, {
+        method: "POST",
+        body: form,
+      });
+    } catch (error) {
+      throw new Error(
+        "Kunne ikke nå IfcTester-tjenesten på " +
+          IFCTESTER_SERVICE_URL +
+          ". Start lokal tjeneste først.",
+      );
+    }
+
+    if (!response.ok) {
+      var message = "";
+      try {
+        var payload = await response.json();
+        message = payload && (payload.error || payload.message) || "";
+      } catch (error) {}
+      throw new Error(
+        "IfcTester-feil (" +
+          response.status +
+          "): " +
+          (message || "ukjent feil fra valideringstjenesten."),
+      );
+    }
+
+    var result = await response.json();
+    if (!result || !Array.isArray(result.runs)) {
+      throw new Error("IfcTester-respons mangler runs-data.");
+    }
+    return result;
+  }
+
+  function buildWidgetReportFromIfcTester(serviceResult) {
+    var runs = coerceArray(serviceResult && serviceResult.runs);
+    var scopes = [];
+    var allGroups = [];
+    var specMap = {};
+    var totalApplicable = 0;
+    var totalPassedChecks = 0;
+    var totalFailedChecks = 0;
+    var totalObjects = 0;
+
+    runs.forEach(function (run, runIndex) {
+      var report = (run && run.report) || {};
+      var scopeLabel = stringifyValue(run && run.ifc_file).trim() || "IFC " + (runIndex + 1);
+      var scopeKey = normalizeComparisonText(scopeLabel) || "ifc-" + (runIndex + 1);
+      var specStatuses = [];
+      var groupsByKey = {};
+      var applicableForScope = 0;
+      var passForScope = 0;
+      var failForScope = 0;
+
+      coerceArray(report.specifications).forEach(function (spec) {
+        var specName = stringifyValue(spec && spec.name) || "Ukjent spesifikasjon";
+        var applicableCount = Number(spec && spec.total_applicable || 0);
+        var specPass = 0;
+        var specFail = 0;
+
+        coerceArray(spec && spec.requirements).forEach(function (req) {
+          var reqFail = Number(req && req.total_fail || 0);
+          var reqPass = Number(req && req.total_pass || 0);
+          specPass += reqPass;
+          specFail += reqFail;
+
+          if (!reqFail) {
+            return;
+          }
+
+          var label = stringifyValue(req && req.label) || stringifyValue(req && req.facet_type) || "Krav";
+          var split = splitCompositePropertyKey(label) || {};
+          var propertySet = split.propertySet || (label.indexOf(".") >= 0 ? label.split(".")[0] : label);
+          var propertyName = split.propertyName || (label.indexOf(".") >= 0 ? label.split(".").slice(1).join(".") : label);
+          var expected = stringifyValue(req && req.value);
+
+          coerceArray(req && req.failed_entities).forEach(function (fe) {
+            var guid = stringifyValue(fe && fe.global_id).trim();
+            var name = stringifyValue(fe && fe.name).trim() || guid || ("Objekt " + stringifyValue(fe && fe.id));
+            var reason = stringifyValue(fe && fe.reason).trim();
+            var key = [scopeKey, specName, propertySet, propertyName, reason].join("::");
+            if (!groupsByKey[key]) {
+              groupsByKey[key] = {
+                key: key,
+                scopeKey: scopeKey,
+                scopeLabel: scopeLabel,
+                modelName: scopeLabel,
+                layerName: scopeLabel,
+                specName: specName,
+                propertySet: propertySet,
+                propertyName: propertyName,
+                reasonCode: "ifctester-fail",
+                title: "Ugyldig verdi på " + propertySet + "." + propertyName,
+                description: reason || "IfcTester rapporterte avvik.",
+                objects: [],
+              };
+            }
+            groupsByKey[key].objects.push({
+              id: stringifyValue(fe && fe.id),
+              guid: guid,
+              name: name,
+              type: stringifyValue(fe && fe.class),
+              modelName: scopeLabel,
+              layerName: scopeLabel,
+              scopeLabel: scopeLabel,
+              actualValue: reason || "[se IfcTester reason]",
+              expectedValue: expected || "[se IDS]",
+            });
+          });
+        });
+
+        var statusEntry = {
+          specName: specName,
+          applicableObjects: {},
+          applicableObjectCount: applicableCount,
+          passedChecks: specPass,
+          failedChecks: specFail,
+        };
+        specStatuses.push(statusEntry);
+        if (!specMap[specName]) {
+          specMap[specName] = {
+            specName: specName,
+            applicableObjectCount: 0,
+            passedChecks: 0,
+            failedChecks: 0,
+          };
+        }
+        specMap[specName].applicableObjectCount += applicableCount;
+        specMap[specName].passedChecks += specPass;
+        specMap[specName].failedChecks += specFail;
+
+        applicableForScope += applicableCount;
+        passForScope += specPass;
+        failForScope += specFail;
+      });
+
+      var scopeGroups = Object.keys(groupsByKey).map(function (key) {
+        return groupsByKey[key];
+      });
+      scopeGroups.forEach(function (group) {
+        group.globalIndex = allGroups.length;
+        allGroups.push(group);
+      });
+
+      scopes.push({
+        scopeKey: scopeKey,
+        scopeLabel: scopeLabel,
+        modelName: scopeLabel,
+        layerName: scopeLabel,
+        objectCount: Number(report && report.total_checks || 0),
+        groups: scopeGroups,
+        specStatuses: specStatuses,
+        summary: {
+          applicableObjectCount: applicableForScope,
+          passedChecks: passForScope,
+          failedChecks: failForScope,
+        },
+      });
+
+      totalApplicable += applicableForScope;
+      totalPassedChecks += passForScope;
+      totalFailedChecks += failForScope;
+      totalObjects += Number(report && report.total_checks || 0);
+    });
+
+    var specStatuses = Object.keys(specMap).map(function (name) {
+      return specMap[name];
+    });
+
+    return {
+      groups: allGroups,
+      scopes: scopes,
+      specStatuses: specStatuses,
+      summary: {
+        objectCount: totalObjects,
+        objectCountUnique: totalObjects,
+        scopeCount: scopes.length,
+        specCount: specStatuses.length,
+        passedChecks: totalPassedChecks,
+        failedChecks: totalFailedChecks,
+        applicableObjectCount: totalApplicable,
+      },
+    };
   }
 
   async function onScopeFilterFocus() {

@@ -1,39 +1,52 @@
-# IDS SVV widget
+﻿# IDS SVV widget
 
-StreamBIM-widget for a:
+StreamBIM-widget for:
 
 - laste opp en `.ids`-fil
-- hente objekter og property sets fra StreamBIM
 - validere modellobjekter mot IDS-regler
 - gruppere like avvik
-- opprette BCF-saker direkte fra avviksgruppene nar StreamBIM-instansen eksponerer dette
+- opprette BCF-saker direkte fra avviksgrupper nar StreamBIM-instansen eksponerer dette
+
+Datakilder:
+
+- `StreamBIM`: eksisterende widget-basert innhenting
+- `Lokal IFC`: tredjeparts valideringsmotor via IfcTester (`ifctester_service`)
 
 ## Filer
 
 - `index.html`: widget-shell
 - `styles.css`: UI
-- `app.js`: StreamBIM-integrasjon, IDS-parser, validering og BCF-opprettelse
+- `app.scope-prefetch-3.js`: aktiv widget-logikk
 - `streambim-widget-api.min.js`: widget-API for StreamBIM
 - `Test_trekkekum.ids`: eksempel-IDS
+- `ifctester_service/`: lokal valideringstjeneste basert pa IfcTester
 
-## Viktig om StreamBIM-data
+## Lokal IFC med IfcTester
 
-Denne første versjonen bruker en tolerant adapter fordi eksakte metodename fra parent-frame ikke er dokumentert i prosjektmappen. Widgeten:
+Kjor lokal tjeneste:
 
-- kobler til StreamBIM
-- lister opp alle parent-metoder den faktisk ser
-- prover kjente kandidatmetoder for objektlesing og BCF-opprettelse, og deaktiverer BCF-knappene hvis API-et ikke eksponerer noen issue-metode
+```powershell
+cd ifctester_service
+.\run_local.ps1
+```
 
-Hvis StreamBIM-instansen bruker andre metodenavn eller payload-formater, kan `app.js` justeres direkte mot de metodene widgeten viser i diagnostikkpanelet.
+Tjenesten starter pa `http://127.0.0.1:8765` og brukes automatisk av widgeten nar `Datakilde = Lokal IFC`.
+
+API:
+
+- `GET /health`
+- `POST /validate` (`multipart/form-data`)
+  - `ids_file` (fil)
+  - `ifc_files` (1..n filer)
 
 ## Lokal test
 
-Kjor en enkel webserver i denne mappen:
+Kjor en enkel webserver i rotmappen:
 
 ```powershell
 python -m http.server 8080
 ```
 
-Deretter aapner du `http://localhost:8080/`.
+Aapne `http://localhost:8080/`.
 
 For full funksjon ma widgeten lastes som iframe inne i StreamBIM.
