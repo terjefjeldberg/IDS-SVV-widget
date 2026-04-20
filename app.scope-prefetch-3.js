@@ -4102,6 +4102,7 @@
     var specStatusesByName = {};
     var passedChecks = 0;
     var failedChecks = 0;
+    var suppressedRules = buildSuppressedRuleLookup(specs, scope.objects);
 
     scope.objects.forEach(function (object) {
       specs.forEach(function (spec) {
@@ -4127,6 +4128,9 @@
         specStatusesByName[specName].applicableObjects[objectKey] = true;
 
         spec.requirements.forEach(function (rule) {
+          if (isRuleSuppressed(rule, spec, suppressedRules)) {
+            return;
+          }
           var actual = getRuleValue(object, rule);
           var outcome = evaluateRule(actual, rule);
           if (outcome.ok) {
@@ -4209,6 +4213,69 @@
         failedChecks: failedChecks,
       },
     };
+  }
+
+  function buildSuppressedRuleLookup(specs, objects) {
+    var lookup = {};
+    var list = coerceArray(objects);
+
+    coerceArray(specs).forEach(function (spec) {
+      var applicable = list.filter(function (object) {
+        return (
+          matchesSpecApplicabilityLocally(object, spec) ||
+          matchesApplicabilityHint(object, spec)
+        );
+      });
+      if (!applicable.length) {
+        return;
+      }
+
+      coerceArray(spec && spec.requirements).forEach(function (rule) {
+        if (!isSuppressibleMissingFieldRule(rule)) {
+          return;
+        }
+
+        var existsAnywhere = applicable.some(function (object) {
+          return hasRuleFieldOnObject(object, rule);
+        });
+        if (!existsAnywhere) {
+          lookup[buildRuleLookupKey(spec, rule)] = true;
+        }
+      });
+    });
+
+    return lookup;
+  }
+
+  function buildRuleLookupKey(spec, rule) {
+    return [
+      normalizeComparisonText(spec && spec.name),
+      normalizeComparisonText(rule && rule.sourceType),
+      normalizeComparisonText(rule && rule.propertySet),
+      normalizeComparisonText(rule && rule.baseName),
+    ].join("::");
+  }
+
+  function isRuleSuppressed(rule, spec, lookup) {
+    if (!lookup) {
+      return false;
+    }
+    return !!lookup[buildRuleLookupKey(spec, rule)];
+  }
+
+  function isSuppressibleMissingFieldRule(rule) {
+    // User requirement: do not report IDS properties that do not exist in the model.
+    return !!(
+      rule &&
+      rule.sourceType === "property" &&
+      rule.propertySet &&
+      rule.baseName
+    );
+  }
+
+  function hasRuleFieldOnObject(object, rule) {
+    var value = getPropertyValue(object, rule.propertySet, rule.baseName);
+    return value !== null && typeof value !== "undefined";
   }
 
   function matchesAllRules(object, rules) {
