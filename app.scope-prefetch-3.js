@@ -375,12 +375,26 @@
     var regex = /#(\d+)\s*=\s*(IFC[A-Z0-9_]+)\s*\(([\s\S]*?)\)\s*;/gi;
     var match;
     var count = 0;
+    var rowsById = {};
+    var rows = [];
+    var objectByEntityId = {};
+    var propertyById = {};
+    var propertySetById = {};
+    var relatesByProps = [];
 
     while ((match = regex.exec(source))) {
       count += 1;
       var entityId = "#" + match[1];
       var ifcClass = String(match[2] || "").toUpperCase();
       var args = splitIfcArguments(match[3] || "");
+      rowsById[entityId] = { id: entityId, ifcClass: ifcClass, args: args };
+      rows.push(rowsById[entityId]);
+    }
+
+    rows.forEach(function (row) {
+      var entityId = row.id;
+      var ifcClass = row.ifcClass;
+      var args = row.args;
       var guid = parseIfcSimpleString(args[0] || "");
       var name = parseIfcSimpleString(args[2] || "");
       var description = parseIfcSimpleString(args[3] || "");
@@ -388,10 +402,30 @@
       var displayName = name || guid || entityId;
 
       if (ifcClass.indexOf("IFC") !== 0) {
-        continue;
+        return;
       }
 
-      objects.push({
+      // Keep validation object list to rooted IFC objects only.
+      if (!isLikelyIfcGuid(guid)) {
+        if (ifcClass === "IFCPROPERTYSINGLEVALUE") {
+          var pName = parseIfcSimpleString(args[0] || "");
+          var pValue = parseIfcWrappedValue(args[2] || "");
+          propertyById[entityId] = { name: pName, value: pValue };
+        } else if (ifcClass === "IFCPROPERTYSET") {
+          propertySetById[entityId] = {
+            name: parseIfcSimpleString(args[2] || "") || "UkjentPset",
+            refs: parseIfcReferenceList(args[4] || ""),
+          };
+        } else if (ifcClass === "IFCRELDEFINESBYPROPERTIES") {
+          relatesByProps.push({
+            relatedRefs: parseIfcReferenceList(args[4] || ""),
+            relatingRef: parseIfcReference(args[5] || ""),
+          });
+        }
+        return;
+      }
+
+      var object = {
         id: entityId,
         guid: isLikelyIfcGuid(guid) ? guid : "",
         name: displayName,
@@ -405,10 +439,10 @@
         propertySets: {
           "__attributes__": {
             Name: name,
-            Description: description,
-            PredefinedType: predefinedType,
-          },
+          Description: description,
+          PredefinedType: predefinedType,
         },
+      },
         raw: {
           id: entityId,
           ifcClass: ifcClass,
@@ -418,8 +452,36 @@
           PredefinedType: predefinedType,
           sourceFile: modelName,
         },
+      };
+      objects.push(object);
+      objectByEntityId[entityId] = object;
+    });
+
+    // Attach Pset properties via IfcRelDefinesByProperties.
+    relatesByProps.forEach(function (rel) {
+      var pset = propertySetById[rel.relatingRef];
+      if (!pset || !pset.refs.length) {
+        return;
+      }
+      rel.relatedRefs.forEach(function (objectRef) {
+        var object = objectByEntityId[objectRef];
+        if (!object) {
+          return;
+        }
+        pset.refs.forEach(function (propRef) {
+          var prop = propertyById[propRef];
+          if (!prop || !prop.name) {
+            return;
+          }
+          assignPropertyValue(
+            object.propertySets,
+            pset.name || "UkjentPset",
+            prop.name,
+            prop.value,
+          );
+        });
       });
-    }
+    });
 
     if (!count) {
       throw new Error(
@@ -473,6 +535,36 @@
       out.push(token.trim());
     }
     return out;
+  }
+
+  function parseIfcReferenceList(value) {
+    return uniqueStrings((String(value || "").match(/#\d+/g) || []).filter(Boolean));
+  }
+
+  function parseIfcReference(value) {
+    var match = String(value || "").match(/#\d+/);
+    return match ? match[0] : "";
+  }
+
+  function parseIfcWrappedValue(value) {
+    var text = String(value || "").trim();
+    if (!text || text === "$" || text === "*") {
+      return "";
+    }
+    // Handles e.g. IFCLABEL('x'), IFCINTEGER(2), IFCBOOLEAN(.T.)
+    var wrapped = text.match(/^[A-Z0-9_]+\(([\s\S]*)\)$/i);
+    if (wrapped) {
+      var inner = String(wrapped[1] || "").trim();
+      if (
+        (inner.charAt(0) === "'" && inner.charAt(inner.length - 1) === "'") ||
+        inner.indexOf("\\X2\\") >= 0 ||
+        inner.indexOf("\\S\\") >= 0
+      ) {
+        return parseIfcSimpleString(inner);
+      }
+      return inner.replace(/^\./, "").replace(/\.$/, "");
+    }
+    return parseIfcSimpleString(text);
   }
 
   function parseIfcSimpleString(value) {
