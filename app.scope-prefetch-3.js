@@ -6,6 +6,7 @@
   var BUILD_ID = "2026-04-09-scope-prefetch-4";
   var SCOPE_CACHE_KEY = "ids-svv-scope-options-v2";
   var IFCTESTER_SERVICE_URL = "http://127.0.0.1:8765/validate";
+  var IFCTESTER_SERVICE_URL_STORAGE_KEY = "ids-svv-ifctester-service-url";
   var DEBUG_PROPERTY_SET = "Trekkekum_853";
   var DEBUG_PROPERTY_NAME = "AntallRor_10840";
 
@@ -123,10 +124,11 @@
         els.scopeFilter.value = "__all__";
       }
     }
+    var ifcTesterUrl = getIfcTesterServiceUrl();
     if (els.dataSourceNote) {
       els.dataSourceNote.textContent = isLocalIfc
         ? "Lokal IFC valideres via IfcTester-tjeneste på " +
-          IFCTESTER_SERVICE_URL +
+          ifcTesterUrl +
           ". Gå til objekt/BCF virker kun for rader med GUID som finnes i StreamBIM."
         : "IFC-data hentes fra StreamBIM. Hvis widgeten ikke finner riktige API-metoder automatisk, må adapteren justeres videre for den aktuelle instansen.";
     }
@@ -1649,6 +1651,7 @@
   }
 
   async function validateWithIfcTesterService(idsName, idsText, ifcFiles) {
+    var endpoint = getIfcTesterServiceUrl();
     var form = new FormData();
     var idsBlob = new Blob([idsText], { type: "application/xml" });
     form.append("ids_file", idsBlob, idsName || "validation.ids");
@@ -1658,14 +1661,14 @@
 
     var response;
     try {
-      response = await fetch(IFCTESTER_SERVICE_URL, {
+      response = await fetch(endpoint, {
         method: "POST",
         body: form,
       });
     } catch (error) {
       throw new Error(
         "Kunne ikke nå IfcTester-tjenesten på " +
-          IFCTESTER_SERVICE_URL +
+          endpoint +
           ". Start lokal tjeneste først.",
       );
     }
@@ -1689,6 +1692,38 @@
       throw new Error("IfcTester-respons mangler runs-data.");
     }
     return result;
+  }
+
+  function getIfcTesterServiceUrl() {
+    var fromQuery = "";
+    try {
+      var params = new URLSearchParams(window.location.search || "");
+      fromQuery = stringifyValue(
+        params.get("ifctester_url") || params.get("ifctester"),
+      ).trim();
+    } catch (error) {}
+
+    if (fromQuery) {
+      try {
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(IFCTESTER_SERVICE_URL_STORAGE_KEY, fromQuery);
+        }
+      } catch (error) {}
+      return fromQuery;
+    }
+
+    try {
+      if (typeof localStorage !== "undefined") {
+        var stored = stringifyValue(
+          localStorage.getItem(IFCTESTER_SERVICE_URL_STORAGE_KEY),
+        ).trim();
+        if (stored) {
+          return stored;
+        }
+      }
+    } catch (error) {}
+
+    return IFCTESTER_SERVICE_URL;
   }
 
   function buildWidgetReportFromIfcTester(serviceResult) {

@@ -7,9 +7,11 @@ from pathlib import Path
 
 import ifcopenshell
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 from ifctester import ids, reporter
 
 app = Flask(__name__)
+CORS(app)
 
 
 @app.get("/health")
@@ -61,5 +63,5 @@ def validate():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("IFCTESTER_PORT", "8765"))
-    app.run(host="127.0.0.1", port=port)
+    port = int(os.environ.get("PORT", os.environ.get("IFCTESTER_PORT", "8765")))
+    app.run(host="0.0.0.0", port=port)

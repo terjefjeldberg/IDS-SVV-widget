@@ -32,6 +32,21 @@ cd ifctester_service
 
 Tjenesten starter pa `http://127.0.0.1:8765` og brukes automatisk av widgeten nar `Datakilde = Lokal IFC`.
 
+## Deploy pa Render
+
+Repoet inneholder `render.yaml` for tjenesten i `ifctester_service/`.
+
+1. Opprett ny Render Web Service fra repoet.
+2. Render leser `render.yaml` automatisk.
+3. Etter deploy, noter URL-en, f.eks. `https://ids-svv-ifctester.onrender.com/validate`.
+4. Start widgeten med query-parameter:
+
+```text
+...?ifctester_url=https://ids-svv-ifctester.onrender.com/validate
+```
+
+Widgeten lagrer endpointet i `localStorage` og bruker det videre.
+
 API:
 
 - `GET /health`
