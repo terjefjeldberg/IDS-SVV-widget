@@ -563,8 +563,12 @@
         }
         await ensureScopeCatalogLoaded();
         await refreshModelLayerOptions();
-        state.selectedScopeKey = getSelectedScopeKey();
-        state.selectedBuildingId = getSelectedBuildingId();
+        // Always validate the full model set. Scope/model-layer selection is presentation only.
+        state.selectedScopeKey = "__all__";
+        state.selectedBuildingId = "";
+        if (els.scopeFilter) {
+          els.scopeFilter.value = "__all__";
+        }
         var modelData = await fetchModelDataFromStreamBim(
           state.streamBim.api,
           specs,
@@ -2060,44 +2064,28 @@
   }
 
   function renderValidationForSelectedScope(specs, allObjects, fromCache) {
-    var selectedScopeKey = getSelectedScopeKey();
-    var selectedScopeLabel = getSelectedScopeLabel();
-    var filteredObjects = filterObjectsByScope(allObjects, selectedScopeKey);
-    var report = validateObjects(specs, filteredObjects);
+    var all = coerceArray(allObjects);
+    var report = validateObjects(specs, all);
     syncScopeFilterFromReport(report);
     state.validation = report;
     renderSummary(report);
     renderResultTable(report);
-    renderPropertyDebug(specs, filteredObjects);
+    renderPropertyDebug(specs, all);
     renderGroups(report);
 
     if (!report.summary.applicableObjectCount) {
-      var noMatchMessage =
-        "Validering ferdig for " +
-        selectedScopeLabel +
-        ", men ingen objekter ble vurdert mot IDS.";
-      var uniqueObjectCount = countUniqueObjects(filteredObjects || []);
-      if (uniqueObjectCount) {
-        noMatchMessage +=
-          " Widgeten leste " +
-          uniqueObjectCount +
-          " objekter i valgt modellag.";
-      }
-      noMatchMessage +=
-        " Sjekk at utvalget i IDS-en bruker property-navn og verdier som faktisk finnes i StreamBIM.";
-      setRunStatus(noMatchMessage, "state-warn");
+      setRunStatus(
+        "Validering ferdig, men ingen objekter ble vurdert mot IDS. Sjekk applicability-regler i IDS-filen.",
+        "state-warn",
+      );
       return;
     }
 
     if (fromCache) {
       setRunStatus(
         report.groups.length
-          ? "Oppdatert visning for " +
-              selectedScopeLabel +
-              ". Se detaljer under Avvik."
-          : "Oppdatert visning for " +
-              selectedScopeLabel +
-              ". Ingen verdiavvik funnet.",
+          ? "Oppdatert visning. Se detaljer under Avvik."
+          : "Oppdatert visning. Ingen verdiavvik funnet.",
         report.groups.length ? "state-warn" : "state-ok",
       );
       return;
@@ -2105,12 +2093,8 @@
 
     setRunStatus(
       report.groups.length
-        ? "Validering ferdig for " +
-            selectedScopeLabel +
-            ". Se detaljer under Avvik."
-        : "Validering ferdig for " +
-            selectedScopeLabel +
-            ". Ingen verdiavvik funnet.",
+        ? "Validering ferdig. Se detaljer under Avvik."
+        : "Validering ferdig. Ingen verdiavvik funnet.",
       report.groups.length ? "state-warn" : "state-ok",
     );
   }
